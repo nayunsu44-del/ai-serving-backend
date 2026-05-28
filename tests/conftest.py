@@ -15,12 +15,21 @@ def settings() -> Settings:
         rate_limit_rpm=1000,
         openai_models=["gpt-test"],
         anthropic_models=["claude-test"],
+        database_url="sqlite+aiosqlite:///:memory:",
+        audit_sync=True,
     )
 
 
-@pytest.fixture
-def app(settings: Settings):
-    return create_app(settings)
+@pytest_asyncio.fixture
+async def app(settings: Settings):
+    app = create_app(settings)
+    async with app.router.lifespan_context(app):
+        yield app
+
+
+@pytest_asyncio.fixture
+async def db_sessionmaker(app):
+    return app.state.db_sessionmaker
 
 
 @pytest.fixture
@@ -33,4 +42,3 @@ async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as async_client:
         yield async_client
-

@@ -11,8 +11,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.errors import openai_error_body
-from app.ratelimit.base import RateLimitResult
-from app.ratelimit.memory import InMemoryRateLimit
+from app.net import client_ip
+from app.ratelimit.base import RateLimitBackend, RateLimitResult
 
 
 class RequestBodyTooLarge(StarletteHTTPException):
@@ -78,7 +78,7 @@ class BodySizeLimitMiddleware:
 class PreAuthRateLimitMiddleware(BaseHTTPMiddleware):
     """Limit failed or missing bearer auth attempts by client IP."""
 
-    def __init__(self, app: ASGIApp, limiter: InMemoryRateLimit) -> None:
+    def __init__(self, app: ASGIApp, limiter: RateLimitBackend) -> None:
         super().__init__(app)
         self.limiter = limiter
 
@@ -90,7 +90,8 @@ class PreAuthRateLimitMiddleware(BaseHTTPMiddleware):
         if self.limiter.requests_per_minute <= 0:
             return await call_next(request)
 
-        key = request.client.host if request.client else "unknown"
+        settings = getattr(request.app.state, "settings", None)
+        key = client_ip(request, settings)
         preview = await self.limiter.preview(key)
         if not preview.allowed:
             return self._rate_limit_response(preview)

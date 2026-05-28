@@ -25,9 +25,15 @@ class RateLimitBackend(ABC):
     as Redis so limits are enforced across workers and hosts.
     """
 
+    requests_per_minute: int
+
     @abstractmethod
     async def allow(self, key: str) -> RateLimitResult:
         """Return whether the caller identified by key may proceed."""
+
+    @abstractmethod
+    async def preview(self, key: str) -> RateLimitResult:
+        """Return whether the caller identified by key has capacity without consuming it."""
 
 
 def get_rate_limit_backend(request: Request) -> RateLimitBackend:

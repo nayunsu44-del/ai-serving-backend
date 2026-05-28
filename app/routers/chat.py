@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
+from app.auth import require_scope
 from app.errors import APIError, ProviderAPIError, RateLimitError, openai_error_body
 from app.normalized import NormalizedChatRequest
 from app.normalized import NormalizedStreamChunk
@@ -61,10 +62,12 @@ async def parse_chat_completion_request(request: Request) -> ChatCompletionReque
         ) from exc
 
     try:
-        return ChatCompletionRequest.model_validate(
+        payload = ChatCompletionRequest.model_validate(
             body,
             context={"settings": request.app.state.settings},
         )
+        request.state.stream = payload.stream
+        return payload
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
 
@@ -202,14 +205,16 @@ async def _stream_chunks(
 async def create_chat_completion(
     request: Request,
     principal=Depends(enforce_rate_limit),
+    _chat_scope=Depends(require_scope("chat")),
     payload: ChatCompletionRequest = Depends(parse_chat_completion_request),
     registry: ProviderRegistry = Depends(get_provider_registry),
 ) -> ChatCompletionResponse | StreamingResponse:
     normalized = payload.to_normalized()
+    request.state.model = normalized.model
+    request.state.stream = normalized.stream
     provider = registry.provider_for_model(normalized.model)
 
     request.state.provider = provider.name
-    request.state.model = normalized.model
 
     if normalized.stream:
         stream_lease = await request.app.state.stream_limiter.acquire(principal.api_key_hash)
