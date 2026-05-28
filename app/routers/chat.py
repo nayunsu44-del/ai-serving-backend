@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.auth import require_scope
+from app.compliance.pii import mask_messages
 from app.errors import APIError, ProviderAPIError, RateLimitError, openai_error_body
 from app.normalized import NormalizedChatRequest
 from app.normalized import NormalizedStreamChunk
@@ -210,6 +211,19 @@ async def create_chat_completion(
     registry: ProviderRegistry = Depends(get_provider_registry),
 ) -> ChatCompletionResponse | StreamingResponse:
     normalized = payload.to_normalized()
+    settings = request.app.state.settings
+    if settings.pii_masking_enabled:
+        masked_messages, pii_summary = mask_messages(normalized.messages, settings.pii_types)
+        normalized.messages = masked_messages
+        request.state.pii_masked = pii_summary
+        if pii_summary:
+            log_event(
+                logger,
+                "pii_masked",
+                request_id=getattr(request.state, "request_id", None),
+                counts=pii_summary,
+            )
+
     request.state.model = normalized.model
     request.state.stream = normalized.stream
     provider = registry.provider_for_model(normalized.model)
@@ -221,7 +235,6 @@ async def create_chat_completion(
         if stream_lease is None:
             raise RateLimitError("Too many concurrent streams")
 
-        settings = request.app.state.settings
         deadline = time.monotonic() + settings.stream_max_duration_seconds
         upstream_stream: AsyncIterator[NormalizedStreamChunk] | None = None
         try:

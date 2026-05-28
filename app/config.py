@@ -41,6 +41,11 @@ class Settings(BaseSettings):
         default="./data/audit_fallback.jsonl",
         alias="AUDIT_FALLBACK_PATH",
     )
+    pii_masking_enabled: bool = Field(default=True, alias="PII_MASKING_ENABLED")
+    pii_types: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["rrn", "card", "phone", "email"],
+        alias="PII_TYPES",
+    )
 
     rate_limit_rpm: int = Field(
         default=60,
@@ -99,6 +104,7 @@ class Settings(BaseSettings):
         "anthropic_models",
         "allowed_hosts",
         "trusted_proxies",
+        "pii_types",
         mode="before",
     )
     @classmethod
