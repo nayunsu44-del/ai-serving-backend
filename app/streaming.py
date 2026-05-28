@@ -7,10 +7,11 @@ from dataclasses import dataclass
 @dataclass
 class StreamLease:
     key: str
-    semaphore: asyncio.BoundedSemaphore
+    limiter: StreamConcurrencyLimiter
+    _released: bool = False
 
     async def release(self) -> None:
-        self.semaphore.release()
+        await self.limiter.release(self)
 
 
 class StreamConcurrencyLimiter:
@@ -19,6 +20,7 @@ class StreamConcurrencyLimiter:
     def __init__(self, max_concurrent_streams: int) -> None:
         self.max_concurrent_streams = max_concurrent_streams
         self._semaphores: dict[str, asyncio.BoundedSemaphore] = {}
+        self._active: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
     async def acquire(self, key: str) -> StreamLease | None:
@@ -32,4 +34,29 @@ class StreamConcurrencyLimiter:
                 return None
 
             await semaphore.acquire()
-            return StreamLease(key=key, semaphore=semaphore)
+            self._active[key] = self._active.get(key, 0) + 1
+            return StreamLease(key=key, limiter=self)
+
+    async def release(self, lease: StreamLease) -> None:
+        async with self._lock:
+            if lease._released:
+                return
+
+            semaphore = self._semaphores.get(lease.key)
+            active = self._active.get(lease.key, 0)
+            if semaphore is None or active <= 0:
+                lease._released = True
+                return
+
+            try:
+                semaphore.release()
+            except ValueError:
+                lease._released = True
+                return
+
+            lease._released = True
+            if active == 1:
+                self._active.pop(lease.key, None)
+                self._semaphores.pop(lease.key, None)
+            else:
+                self._active[lease.key] = active - 1

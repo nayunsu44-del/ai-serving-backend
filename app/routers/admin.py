@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
@@ -22,6 +25,7 @@ router = APIRouter(
     prefix="/admin",
     tags=["admin"],
 )
+logger = logging.getLogger("ai_serving.audit")
 
 GroupBy = Literal["key", "model", "org"]
 CostString = Annotated[str, Field(pattern=r"^\d+\.\d{6}$")]
@@ -219,6 +223,18 @@ def _audit_fields_from_json(value: object) -> dict:
     if isinstance(fields.get("ts"), str):
         fields["ts"] = datetime.fromisoformat(fields["ts"].replace("Z", "+00:00"))
     return fields
+
+
+def _append_audit_quarantine(path: Path, lines: list[str]) -> None:
+    if not lines:
+        return
+
+    failed_path = path.with_name(path.name + ".failed")
+    failed_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(failed_path, "a", encoding="utf-8") as handle:
+        for line in lines:
+            handle.write(line.rstrip("\r\n"))
+            handle.write("\n")
 
 
 @router.get("/usage", response_model=UsageResponse)
@@ -478,20 +494,49 @@ async def replay_audit_fallback(
     if not path.exists():
         return AuditReplayResponse(replayed=0, failed=0)
 
+    snapshot_path = path.with_name(path.name + f".replay-{uuid4().hex}")
+    if not path.exists():
+        return AuditReplayResponse(replayed=0, failed=0)
+    try:
+        os.replace(path, snapshot_path)
+    except FileNotFoundError:
+        return AuditReplayResponse(replayed=0, failed=0)
+    except OSError as exc:
+        logger.warning(
+            "Audit fallback replay snapshot unavailable",
+            extra={"extra_fields": {"audit_fallback_path": str(path)}},
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Audit replay temporarily unavailable",
+        ) from exc
+
     replayed = 0
     failed = 0
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            fields = _audit_fields_from_json(json.loads(line))
-            async with sessionmaker() as session:
-                session.add(AuditLog(**fields))
-                await session.commit()
-            replayed += 1
-        except Exception:
-            failed += 1
+    lines: list[str] = []
+    next_line_index = 0
+    quarantine_lines: list[str] = []
+    try:
+        lines = snapshot_path.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            next_line_index = index
+            if not line.strip():
+                next_line_index = index + 1
+                continue
+            try:
+                fields = _audit_fields_from_json(json.loads(line))
+                async with sessionmaker() as session:
+                    session.add(AuditLog(**fields))
+                    await session.commit()
+                replayed += 1
+            except Exception:
+                failed += 1
+                quarantine_lines.append(line)
+            next_line_index = index + 1
+    finally:
+        remaining_lines = [line for line in lines[next_line_index:] if line.strip()]
+        _append_audit_quarantine(path, quarantine_lines + remaining_lines)
+        snapshot_path.unlink(missing_ok=True)
 
-    path.write_text("", encoding="utf-8")
     return AuditReplayResponse(replayed=replayed, failed=failed)

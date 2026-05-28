@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 91/91 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건(감사 replay 손실, 스트림 제한기 누수) 수정. 95/95 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
 
 ## 현재 상태
 
@@ -35,6 +35,12 @@
 - 플레이키 원인: APIKeyResolver의 `_touch_last_used_at` fire-and-forget asyncio.create_task가 audit insert와 StaticPool 단일 SQLite 연결 경쟁.
 - 해결: resolver가 SELECT + last_used_at UPDATE를 같은 세션에서 처리. auth_task 폐기.
 - 검증: 50회 연속 실행 59/59 PASS.
+
+### 코드 리뷰 수정 (MEDIUM 2건)
+
+- **감사 replay 데이터 손실 수정** (`admin.py`): replay가 `os.replace`로 폴백 파일을 원자적 스냅샷 후 처리 → 동시 append 유실 방지. 재주입 실패/미처리 라인은 `<fallback>.failed`로 격리(영구 손실 방지). 스냅샷 rename 실패 시 503. (이전: 무조건 truncate로 실패 라인 손실.)
+- **스트림 동시성 제한기 메모리 누수 수정** (`streaming.py`): `StreamLease.release()`가 limiter 경유, 마지막 lease 해제 시 `_semaphores`/`_active`에서 키 제거(idle 정리). reject-at-capacity 동작 보존, 이중 해제 멱등.
+- 잔여 LOW/하드닝(운영자 정규식 ReDoS 가드, 금지필터 컴파일 캐싱, last_used_at 쓰기 증폭, pricing 로그 스팸, SQLite 단일 writer)은 미적용 — 필요 시 후속.
 
 ### 리포 위생 / 재현성
 
@@ -107,7 +113,7 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스: `app/compliance/pii.py`(PII), `app/compliance/filter.py`(금지표현). 정책 모드/403은 `app/routers/chat.py` + `app/errors.py`(PolicyViolationError). 영속화는 `app/observability.py` + `app/db/models.py`(PolicyEvent, AuditMessage).
-- 테스트: `tests/` (91건; PII 유닛 `test_pii.py`, PII/gateway E2E `test_pii_e2e.py`, 정책 `test_policy.py`, 정책 영속화 `test_policy_persistence.py`)
+- 테스트: `tests/` (95건; PII 유닛 `test_pii.py`, PII/gateway E2E `test_pii_e2e.py`, 정책 `test_policy.py`, 정책 영속화 `test_policy_persistence.py`, 스트림 제한기 `test_streaming.py`)
 
 ## 빠른 검증 명령
 
