@@ -60,6 +60,8 @@ Rate limiting uses an in-memory token bucket for development and tests by defaul
 
 `PII_MASKING_ENABLED=true` redacts personal data (Korean resident registration numbers, Luhn-valid card numbers, phone numbers, emails) from request messages before they reach the upstream provider. `PII_TYPES` selects which detectors run. Masking is irreversible; only redaction counts are logged, never the raw values.
 
+Compliance events are recorded to `policy_event`; `AUDIT_STORE_MESSAGES=true` additionally stores PII-masked message bodies in `audit_message`, never raw message text.
+
 `ALLOWED_HOSTS` defaults to `*` for local development. Lock it down to the deployed hostnames in production. `/docs` and `/openapi.json` are enabled by default for development; set `DOCS_ENABLED=false` in production.
 
 ## Run

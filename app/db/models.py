@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -62,6 +63,50 @@ class AuditLog(Base):
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=Decimal("0"))
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     stream: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PolicyEvent(Base):
+    __tablename__ = "policy_event"
+    __table_args__ = (
+        Index("ix_policy_event_request_id", "request_id"),
+        Index("ix_policy_event_ts", "ts"),
+        Index("ix_policy_event_org_id", "org_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    principal_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    org_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("organization.id"),
+        nullable=True,
+        default=None,
+    )
+    api_key_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("api_key.id"),
+        nullable=True,
+        default=None,
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    stream: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AuditMessage(Base):
+    __tablename__ = "audit_message"
+    __table_args__ = (Index("ix_audit_message_request_id", "request_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Organization(Base):

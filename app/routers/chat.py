@@ -261,6 +261,10 @@ async def create_chat_completion(
     if settings.pii_masking_enabled:
         masked_messages, pii_summary = mask_messages(normalized.messages, settings.pii_types)
         normalized.messages = masked_messages
+        request.state.stored_messages = [
+            {"seq": i, "role": message.role, "content": message.content}
+            for i, message in enumerate(masked_messages)
+        ]
         request.state.pii_masked = pii_summary
         if pii_summary:
             log_event(

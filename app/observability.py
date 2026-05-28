@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 
 from app.audit_fallback import write_audit_fallback
-from app.db.models import AuditLog
+from app.db.models import AuditLog, AuditMessage, PolicyEvent
 from app.pricing import calculate_cost
 
 SECRET_FIELD_RE = re.compile(r"(api[_-]?key|authorization|token|secret|\bkey\b)", re.IGNORECASE)
@@ -102,11 +102,21 @@ def _write_audit_fallback(settings: Any, fields: dict[str, Any]) -> None:
         )
 
 
-async def _insert_audit_log(sessionmaker: Any, fields: dict[str, Any], settings: Any) -> None:
+async def _insert_audit_log(
+    sessionmaker: Any,
+    fields: dict[str, Any],
+    policy_events: list[dict[str, Any]],
+    audit_messages: list[dict[str, Any]],
+    settings: Any,
+) -> None:
     logger = logging.getLogger("ai_serving.audit")
     try:
         async with sessionmaker() as session:
             session.add(AuditLog(**fields))
+            for policy_event in policy_events:
+                session.add(PolicyEvent(**policy_event))
+            for audit_message in audit_messages:
+                session.add(AuditMessage(**audit_message))
             await session.commit()
     except Exception:
         logger.warning(
@@ -114,6 +124,7 @@ async def _insert_audit_log(sessionmaker: Any, fields: dict[str, Any], settings:
             extra={"extra_fields": {"request_id": fields.get("request_id")}},
             exc_info=True,
         )
+        # Fallback replay is intentionally limited to the AuditLog row in this chunk.
         _write_audit_fallback(settings, fields)
 
 
@@ -148,6 +159,54 @@ async def _schedule_audit_log(request: Request, status_code: int, latency_ms: in
         "stream": bool(getattr(request.state, "stream", False)),
     }
 
+    policy_event_base = {
+        "request_id": fields["request_id"],
+        "principal_hash": fields["principal_hash"],
+        "org_id": fields["org_id"],
+        "api_key_id": fields["api_key_id"],
+        "stream": fields["stream"],
+    }
+    policy_events = [
+        {
+            **policy_event_base,
+            "event_type": str(event.get("event_type", "")),
+            "action": str(event.get("action", "")),
+            "rule_id": event.get("rule_id"),
+            "count": int(event.get("count") or 0),
+            "severity": str(event.get("severity") or "medium"),
+        }
+        for event in getattr(request.state, "policy_events", [])
+        if isinstance(event, dict)
+    ]
+    pii_masked = getattr(request.state, "pii_masked", {})
+    if isinstance(pii_masked, dict):
+        for pii_type, count in pii_masked.items():
+            policy_events.append(
+                {
+                    **policy_event_base,
+                    "event_type": "pii_mask",
+                    "action": "mask",
+                    "rule_id": str(pii_type),
+                    "count": int(count or 0),
+                    "severity": "info",
+                }
+            )
+
+    audit_messages: list[dict[str, Any]] = []
+    if settings.audit_store_messages:
+        stored_messages = getattr(request.state, "stored_messages", [])
+        if isinstance(stored_messages, list):
+            audit_messages = [
+                {
+                    "request_id": fields["request_id"],
+                    "seq": int(message.get("seq") or 0),
+                    "role": str(message.get("role", "")),
+                    "content": str(message.get("content", "")),
+                }
+                for message in stored_messages
+                if isinstance(message, dict)
+            ]
+
     sessionmaker = getattr(request.app.state, "db_sessionmaker", None)
     if sessionmaker is None:
         logging.getLogger("ai_serving.audit").warning(
@@ -157,10 +216,12 @@ async def _schedule_audit_log(request: Request, status_code: int, latency_ms: in
         return
 
     if settings.audit_sync:
-        await _insert_audit_log(sessionmaker, fields, settings)
+        await _insert_audit_log(sessionmaker, fields, policy_events, audit_messages, settings)
         return
 
-    task = asyncio.create_task(_insert_audit_log(sessionmaker, fields, settings))
+    task = asyncio.create_task(
+        _insert_audit_log(sessionmaker, fields, policy_events, audit_messages, settings)
+    )
     tasks = getattr(request.app.state, "audit_tasks", None)
     if isinstance(tasks, set):
         tasks.add(task)
