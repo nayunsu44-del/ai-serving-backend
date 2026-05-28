@@ -4,10 +4,14 @@ import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 
 from app.normalized import NormalizedMessage
 
 logger = logging.getLogger("ai_serving.compliance")
+
+MAX_RULE_PATTERN_CHARS = 512
+MAX_RULES = 200
 
 
 @dataclass(frozen=True)
@@ -23,12 +27,32 @@ class PolicyMatch:
     severity: str
 
 
-def compile_rules(patterns: Iterable[str]) -> list[CompiledRule]:
+@lru_cache(maxsize=32)
+def _compile_rules_cached(patterns: tuple[str, ...]) -> tuple[CompiledRule, ...]:
     rules: list[CompiledRule] = []
-    for entry in patterns:
+    if len(patterns) > MAX_RULES:
+        logger.warning(
+            "Forbidden content rule limit exceeded; extra rules skipped",
+            extra={"extra_fields": {"max_rules": MAX_RULES}},
+        )
+
+    for entry in patterns[:MAX_RULES]:
         rule_id, separator, regex = entry.partition("=")
         rule_id = rule_id.strip()
         if not separator or not rule_id:
+            continue
+        # This bounds some obvious ReDoS exposure, but true immunity requires a
+        # timeout-capable engine such as regex or subprocess-isolated matching.
+        if len(regex) > MAX_RULE_PATTERN_CHARS:
+            logger.warning(
+                "Forbidden content rule pattern too long; rule skipped",
+                extra={
+                    "extra_fields": {
+                        "rule_id": rule_id,
+                        "max_pattern_chars": MAX_RULE_PATTERN_CHARS,
+                    }
+                },
+            )
             continue
         try:
             pattern = re.compile(regex, re.IGNORECASE)
@@ -44,7 +68,11 @@ def compile_rules(patterns: Iterable[str]) -> list[CompiledRule]:
             )
             continue
         rules.append(CompiledRule(rule_id=rule_id, pattern=pattern))
-    return rules
+    return tuple(rules)
+
+
+def compile_rules(patterns: Iterable[str]) -> tuple[CompiledRule, ...]:
+    return _compile_rules_cached(tuple(patterns))
 
 
 def scan_messages(

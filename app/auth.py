@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -66,9 +67,27 @@ def _parse_scopes(value: str | None) -> frozenset[str]:
 
 
 class APIKeyResolver:
-    def __init__(self, env_store: EnvAPIKeyStore) -> None:
+    def __init__(
+        self,
+        env_store: EnvAPIKeyStore,
+        api_key_last_used_min_interval_seconds: int = 60,
+    ) -> None:
         self.env_store = env_store
+        self.api_key_last_used_min_interval_seconds = (
+            api_key_last_used_min_interval_seconds
+        )
         self.auth_tasks: set[asyncio.Task] | None = None
+
+    def _should_update_last_used(self, last_used_at: datetime | None, now: datetime) -> bool:
+        interval = self.api_key_last_used_min_interval_seconds
+        if interval == 0 or last_used_at is None:
+            return True
+        if last_used_at.tzinfo is None:
+            last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+        try:
+            return last_used_at <= now - timedelta(seconds=interval)
+        except TypeError:
+            return True
 
     async def resolve(self, token: str, sessionmaker) -> APIKeyPrincipal | None:
         token_hash = _sha256_hex(token)
@@ -84,8 +103,10 @@ class APIKeyResolver:
                     )
                     api_key = result.scalar_one_or_none()
                     if api_key is not None:
-                        api_key.last_used_at = utc_now()
-                        await session.commit()
+                        now = utc_now()
+                        if self._should_update_last_used(api_key.last_used_at, now):
+                            api_key.last_used_at = now
+                            await session.commit()
                         return APIKeyPrincipal(
                             api_key_hash=token_hash,
                             api_key_id=api_key.id,

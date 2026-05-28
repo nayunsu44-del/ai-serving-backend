@@ -27,7 +27,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_logging(settings.log_level)
 
     env_api_key_store = EnvAPIKeyStore.from_plaintext(settings.api_keys)
-    api_key_resolver = APIKeyResolver(env_api_key_store)
+    api_key_resolver = APIKeyResolver(
+        env_api_key_store,
+        settings.api_key_last_used_min_interval_seconds,
+    )
     settings.discard_raw_api_keys()
 
     @asynccontextmanager

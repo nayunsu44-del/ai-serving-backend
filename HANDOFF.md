@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건(감사 replay 손실, 스트림 제한기 누수) 수정. 95/95 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건 + LOW 5건 수정 완료. 102/102 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
 
 ## 현재 상태
 
@@ -40,7 +40,13 @@
 
 - **감사 replay 데이터 손실 수정** (`admin.py`): replay가 `os.replace`로 폴백 파일을 원자적 스냅샷 후 처리 → 동시 append 유실 방지. 재주입 실패/미처리 라인은 `<fallback>.failed`로 격리(영구 손실 방지). 스냅샷 rename 실패 시 503. (이전: 무조건 truncate로 실패 라인 손실.)
 - **스트림 동시성 제한기 메모리 누수 수정** (`streaming.py`): `StreamLease.release()`가 limiter 경유, 마지막 lease 해제 시 `_semaphores`/`_active`에서 키 제거(idle 정리). reject-at-capacity 동작 보존, 이중 해제 멱등.
-- 잔여 LOW/하드닝(운영자 정규식 ReDoS 가드, 금지필터 컴파일 캐싱, last_used_at 쓰기 증폭, pricing 로그 스팸, SQLite 단일 writer)은 미적용 — 필요 시 후속.
+### 코드 리뷰 수정 (LOW/하드닝 5건, 완료)
+
+- **#3 금지 정규식 상한** (`filter.py`): 패턴 길이 `MAX_RULE_PATTERN_CHARS=512`·개수 `MAX_RULES=200` 초과 시 컴파일 거부(부분 ReDoS 완화 — 순수 `re`는 타임아웃 불가, 완전 면역은 범위 밖).
+- **#4 금지필터 컴파일 캐싱** (`filter.py`): `_compile_rules_cached` `lru_cache`(패턴 튜플 키) → 매 요청 재컴파일 제거. 런타임 패턴 변경도 안전(다른 튜플=재컴파일).
+- **#5 last_used_at 디바운스** (`auth.py`/`config.py`): `API_KEY_LAST_USED_MIN_INTERVAL_SECONDS`(기본 60) 경과 시에만 UPDATE. naive datetime은 UTC로 정규화. 0이면 항상 업데이트. (플레이키 픽스 유지 — 같은 세션 처리.)
+- **#6 pricing 로그 스팸** (`pricing.py`): 미등록 모델당 1회만 경고.
+- **#7 SQLite 동시성** (`db/engine.py`): 파일 DB에 `PRAGMA journal_mode=WAL`+`busy_timeout=5000`+`synchronous=NORMAL`. `:memory:`는 StaticPool 유지.
 
 ### 리포 위생 / 재현성
 
@@ -86,7 +92,7 @@
 ### Phase 5 — 운영 강화 (꾸준히)
 
 - [ ] **Alembic 마이그레이션 정식화** (현재 `Base.metadata.create_all` 사용 중. 운영 배포 전 필수).
-- [ ] **last_used_at debouncing**: 매 요청 UPDATE는 부하. N초마다만 UPDATE하도록 조정. (현재는 race 회피용으로 일단 sync 처리.)
+- [x] **last_used_at debouncing** ✅ 완료. `API_KEY_LAST_USED_MIN_INTERVAL_SECONDS`(기본 60) 경과 시에만 UPDATE. 코드 리뷰 수정 섹션 #5 참고.
 - [ ] **Audit log rotation/archival**: 1년+ 보관 후 콜드 스토리지로 이관.
 - [ ] **Postgres 통합 테스트**: 현재 sqlite만 검증됨. compose로 띄워서 실제 테스트.
 - [ ] **Docker compose 부팅 검증**: 현재 코드만 작성됨. `docker compose up` 실제 동작 확인 (Docker CLI 없는 환경에서 검증 안 됨).
@@ -113,7 +119,7 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스: `app/compliance/pii.py`(PII), `app/compliance/filter.py`(금지표현). 정책 모드/403은 `app/routers/chat.py` + `app/errors.py`(PolicyViolationError). 영속화는 `app/observability.py` + `app/db/models.py`(PolicyEvent, AuditMessage).
-- 테스트: `tests/` (95건; PII 유닛 `test_pii.py`, PII/gateway E2E `test_pii_e2e.py`, 정책 `test_policy.py`, 정책 영속화 `test_policy_persistence.py`, 스트림 제한기 `test_streaming.py`)
+- 테스트: `tests/` (102건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`)
 
 ## 빠른 검증 명령
 

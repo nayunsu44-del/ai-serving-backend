@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list, alias="API_KEYS")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    api_key_last_used_min_interval_seconds: int = Field(
+        default=60,
+        ge=0,
+        alias="API_KEY_LAST_USED_MIN_INTERVAL_SECONDS",
+    )
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/app.db",
         alias="DATABASE_URL",

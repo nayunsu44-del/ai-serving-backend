@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import Request
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -23,7 +24,21 @@ def create_engine(database_url: str) -> AsyncEngine:
     kwargs = {}
     if database_url == "sqlite+aiosqlite:///:memory:":
         kwargs["poolclass"] = StaticPool
-    return create_async_engine(database_url, **kwargs)
+    engine = create_async_engine(database_url, **kwargs)
+
+    if database_url.startswith("sqlite+aiosqlite:///") and database_url != (
+        "sqlite+aiosqlite:///:memory:"
+    ):
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _sqlite_pragmas(dbapi_conn, _record):
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.close()
+
+    return engine
 
 
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
