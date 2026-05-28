@@ -41,6 +41,12 @@ class Settings(BaseSettings):
         default="./data/audit_fallback.jsonl",
         alias="AUDIT_FALLBACK_PATH",
     )
+    audit_store_messages: bool = Field(default=False, alias="AUDIT_STORE_MESSAGES")
+    policy_mode: str = Field(default="log_only", alias="POLICY_MODE")
+    forbidden_patterns: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="FORBIDDEN_PATTERNS",
+    )
     pii_masking_enabled: bool = Field(default=True, alias="PII_MASKING_ENABLED")
     pii_types: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["rrn", "card", "phone", "email"],
@@ -105,11 +111,20 @@ class Settings(BaseSettings):
         "allowed_hosts",
         "trusted_proxies",
         "pii_types",
+        "forbidden_patterns",
         mode="before",
     )
     @classmethod
     def parse_csv_lists(cls, value: Any) -> list[str]:
         return _parse_csv(value)
+
+    @field_validator("policy_mode")
+    @classmethod
+    def validate_policy_mode(cls, value: str) -> str:
+        allowed = {"block", "log_only", "disabled"}
+        if value not in allowed:
+            raise ValueError("POLICY_MODE must be one of: block, log_only, disabled")
+        return value
 
     def discard_raw_api_keys(self) -> None:
         """Drop service bearer keys after startup hashing."""

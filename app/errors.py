@@ -49,6 +49,15 @@ class RateLimitError(APIError):
     code = "rate_limit_exceeded"
 
 
+class PolicyViolationError(APIError):
+    status_code = 403
+    error_type = "content_policy_violation"
+    code = "content_policy_violation"
+
+    def __init__(self, message: str = "Request blocked by content policy.") -> None:
+        super().__init__(message)
+
+
 class UnsupportedModelError(APIError):
     status_code = 400
     error_type = "invalid_request_error"
@@ -136,6 +145,24 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     )
 
 
+async def policy_violation_error_handler(
+    request: Request, exc: PolicyViolationError
+) -> JSONResponse:
+    request.state.error_type = exc.error_type
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "message": exc.message,
+                "type": exc.error_type,
+                "param": None,
+                "code": exc.code,
+            }
+        },
+        headers=exc.headers,
+    )
+
+
 def _log_provider_api_error(request: Request, exc: ProviderAPIError) -> None:
     request_id = getattr(request.state, "request_id", None)
     level = (
@@ -198,6 +225,7 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(PolicyViolationError, policy_violation_error_handler)
     app.add_exception_handler(APIError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)

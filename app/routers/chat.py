@@ -14,8 +14,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.auth import require_scope
+from app.compliance.filter import compile_rules, scan_messages
 from app.compliance.pii import mask_messages
-from app.errors import APIError, ProviderAPIError, RateLimitError, openai_error_body
+from app.errors import (
+    APIError,
+    PolicyViolationError,
+    ProviderAPIError,
+    RateLimitError,
+    openai_error_body,
+)
 from app.normalized import NormalizedChatRequest
 from app.normalized import NormalizedStreamChunk
 from app.observability import log_event
@@ -212,6 +219,45 @@ async def create_chat_completion(
 ) -> ChatCompletionResponse | StreamingResponse:
     normalized = payload.to_normalized()
     settings = request.app.state.settings
+    request.state.model = normalized.model
+    request.state.stream = normalized.stream
+
+    if settings.policy_mode != "disabled" and settings.forbidden_patterns:
+        rules = compile_rules(settings.forbidden_patterns)
+        matches = scan_messages(normalized.messages, rules)
+        if matches:
+            action = "block" if settings.policy_mode == "block" else "log"
+            events = [
+                {
+                    "event_type": "forbidden_content",
+                    "action": action,
+                    "rule_id": match.rule_id,
+                    "count": match.count,
+                    "severity": match.severity,
+                }
+                for match in matches
+            ]
+            existing_events = getattr(request.state, "policy_events", [])
+            request.state.policy_events = existing_events + events
+            log_event(
+                logger,
+                "policy_event",
+                request_id=getattr(request.state, "request_id", None),
+                mode=settings.policy_mode,
+                action=action,
+                matches=[
+                    {
+                        "rule_id": match.rule_id,
+                        "count": match.count,
+                        "severity": match.severity,
+                    }
+                    for match in matches
+                ],
+            )
+            if settings.policy_mode == "block":
+                request.state.error_type = "content_policy_violation"
+                raise PolicyViolationError()
+
     if settings.pii_masking_enabled:
         masked_messages, pii_summary = mask_messages(normalized.messages, settings.pii_types)
         normalized.messages = masked_messages
@@ -224,8 +270,6 @@ async def create_chat_completion(
                 counts=pii_summary,
             )
 
-    request.state.model = normalized.model
-    request.state.stream = normalized.stream
     provider = registry.provider_for_model(normalized.model)
 
     request.state.provider = provider.name
