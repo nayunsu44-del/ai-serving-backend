@@ -36,6 +36,13 @@
 - 해결: resolver가 SELECT + last_used_at UPDATE를 같은 세션에서 처리. auth_task 폐기.
 - 검증: 50회 연속 실행 59/59 PASS.
 
+### 리포 위생 / 재현성
+
+- **줄바꿈 고정**: `.gitattributes` 추가(`* text=auto eol=lf` + 바이너리 규칙). 전역 `core.autocrlf=true`로 인한 워킹트리 LF/CRLF 혼재 제거. 워킹트리 재정규화 완료.
+- **의존성 완전 고정**: `requirements.txt`를 검증된 venv의 전체 `pip freeze`로 교체(47개 전부 `==`). 기존 `>=` 6개 + 누락 전이 의존성(greenlet/lupa/Mako/MarkupSafe/sortedcontainers) 포함. `asyncpg==0.31.0` 설치로 venv가 선언 의존성과 일치.
+- **pytest 설정 고정**: `pytest.ini`(`asyncio_mode=strict`, `asyncio_default_fixture_loop_scope=function`, `testpaths=tests`).
+- **Python 3.13** 기준. README/HANDOFF 테스트 명령 일치: `.\.venv\Scripts\python.exe -m pytest -q`.
+
 ## 다음에 해야 할 것
 
 ### Phase 2 — 컴플라이언스 (우선순위 高)

@@ -1,0 +1,17 @@
+# Normalize line endings for reproducible, cross-platform checkouts.
+# All text files are stored and checked out with LF, overriding any
+# local core.autocrlf=true setting (the app runs on Linux in Docker).
+* text=auto eol=lf
+
+# Binary file types — never normalize.
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary

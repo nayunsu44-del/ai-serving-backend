@@ -6,6 +6,8 @@ Supported chat fields are `model`, `messages`, `stream`, `temperature`, and `max
 
 ## Install
 
+Requires **Python 3.13**. Dependencies are fully pinned in `requirements.txt` for reproducible installs.
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -30,6 +32,8 @@ TRUSTED_PROXIES=
 TRUST_FORWARDED_FOR=false
 AUDIT_SYNC=false
 AUDIT_FALLBACK_PATH=./data/audit_fallback.jsonl
+PII_MASKING_ENABLED=true
+PII_TYPES=rrn,card,phone,email
 MAX_REQUEST_BYTES=1048576
 MAX_MESSAGES=200
 MAX_MESSAGE_CHARS=100000
@@ -53,6 +57,8 @@ Rate limiting uses an in-memory token bucket for development and tests by defaul
 `TRUST_FORWARDED_FOR=false` ignores `X-Forwarded-For`; set it to `true` only with `TRUSTED_PROXIES` listing trusted proxy IPs/CIDRs. `PRE_AUTH_RPM_PER_IP` uses that resolved client IP for failed-auth throttling.
 
 `AUDIT_SYNC=false` writes audit rows in the background; set `AUDIT_SYNC=true` to await audit insertion before returning. If audit DB insertion fails, JSONL fallback is written to `AUDIT_FALLBACK_PATH` and can be replayed with `POST /admin/audit/replay` by a `super_admin`.
+
+`PII_MASKING_ENABLED=true` redacts personal data (Korean resident registration numbers, Luhn-valid card numbers, phone numbers, emails) from request messages before they reach the upstream provider. `PII_TYPES` selects which detectors run. Masking is irreversible; only redaction counts are logged, never the raw values.
 
 `ALLOWED_HOSTS` defaults to `*` for local development. Lock it down to the deployed hostnames in production. `/docs` and `/openapi.json` are enabled by default for development; set `DOCS_ENABLED=false` in production.
 
@@ -115,8 +121,10 @@ Admin endpoints require the `admin` scope and include `/admin/usage`, `/admin/au
 
 ## Tests
 
+Run against the project virtualenv (no activation required):
+
 ```powershell
-pytest
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Tests mock provider clients and do not call external APIs.
+Or, with the venv activated, simply `pytest`. Test configuration (async mode, test paths) is pinned in `pytest.ini`. Tests mock provider clients and do not call external APIs.
