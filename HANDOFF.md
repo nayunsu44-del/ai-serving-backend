@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 착수: PII 마스킹 구현 완료. 68/68 테스트 그린, 플레이키 0건. 다음은 Phase 2 잔여(금지표현 필터, 메시지 본문 저장).
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 착수: PII 마스킹 구현 + E2E 검증 완료. 77/77 테스트 그린, 플레이키 0건. 다음은 Phase 2 잔여(금지표현 필터, 메시지 본문 저장).
 
 ## 현재 상태
 
@@ -42,6 +42,16 @@
 - **의존성 완전 고정**: `requirements.txt`를 검증된 venv의 전체 `pip freeze`로 교체(47개 전부 `==`). 기존 `>=` 6개 + 누락 전이 의존성(greenlet/lupa/Mako/MarkupSafe/sortedcontainers) 포함. `asyncpg==0.31.0` 설치로 venv가 선언 의존성과 일치.
 - **pytest 설정 고정**: `pytest.ini`(`asyncio_mode=strict`, `asyncio_default_fixture_loop_scope=function`, `testpaths=tests`).
 - **Python 3.13** 기준. README/HANDOFF 테스트 명령 일치: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+### P1 — 키 없는 E2E 품질 검증 (완료)
+
+`tests/test_pii_e2e.py` (앱 코드 변경 0, fake provider만 사용). 실제 OpenAI/Anthropic 키 없이 gateway 흐름 전체 검증:
+- **PII가 provider payload에 실제 반영**: `CaptureProvider.last_request`로 모델이 받는 메시지 확인 — 스트림/논스트림 모두 원문 PII 4종(RRN/카드/전화/이메일) 부재 + `[REDACTED:*]` 존재.
+- **audit 무유출**: `AuditLog` row 전 컬럼 직렬화 후 원문 PII 부재 단언(stream True/False 파라미터화). `stream` 플래그·status도 검증.
+- **구조화 로그 무유출**: caplog + root 핸들러로 모든 로그 수집, 원문 PII 부재 + `pii_masked` 이벤트는 카운트만(`{rrn:1,card:1,phone:1,email:1}`).
+- **음성 대조**: `PII_MASKING_ENABLED=false`면 원문 그대로 전달 / `PII_TYPES=["email"]`면 이메일만 마스킹·RRN 원문 유지 (둘 다 `app.state.settings` 런타임 mutate로 검증).
+- **스트림/논스트림 패리티**: 동일 입력에 플레이스홀더 타입 집합 동일.
+- **멀티턴 라운드트립**: 4-메시지 대화 role/순서 보존 + OpenAI 응답 형태 검증.
 
 ## 다음에 해야 할 것
 
@@ -95,7 +105,7 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스(PII): `app/compliance/pii.py`
-- 테스트: `tests/` (68건, PII는 `tests/test_pii.py`)
+- 테스트: `tests/` (77건; PII 유닛 `tests/test_pii.py`, PII/gateway E2E `tests/test_pii_e2e.py`)
 
 ## 빠른 검증 명령
 
