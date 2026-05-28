@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 검토 2회 + 패치 완료. 59/59 테스트 그린, 플레이키 0건. 다음은 Phase 2(PII/컴플라이언스) 또는 운영 강화.
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 착수: PII 마스킹 구현 완료. 68/68 테스트 그린, 플레이키 0건. 다음은 Phase 2 잔여(금지표현 필터, 메시지 본문 저장).
 
 ## 현재 상태
 
@@ -40,10 +40,11 @@
 
 ### Phase 2 — 컴플라이언스 (우선순위 高)
 
-- [ ] **PII 마스킹**: 요청 메시지에서 주민번호·카드번호·전화번호·이메일 등 패턴 검출 후 토큰화/마스킹. 모델로 보내기 전 처리.
-- [ ] **금지표현 필터**: 입력 + 출력에 대해 금지 키워드/패턴 검사. 차단 또는 로깅.
-- [ ] **응답 근거 표시**: 응답에 사용된 컨텍스트/문서 ID를 메타데이터로 첨부 (RAG 연계).
-- [ ] **메시지 본문 옵셔널 저장**: `AUDIT_STORE_MESSAGES=true`일 때 PII 마스킹된 본문을 audit_log에 저장 (별도 테이블 권장).
+- [x] **PII 마스킹** ✅ 완료. `app/compliance/pii.py`. 요청 메시지에서 주민번호(생년월일+성별자리[1-8] 검증)·카드번호(Luhn 검증)·전화번호(휴대/02/지역/+82)·이메일 탐지 후 모델 전송 전 **비가역 마스킹**. 스팬 기반 비중복 치환, 우선순위 email>rrn>card>phone. 플레이스홀더 `[REDACTED:TYPE:n]` — 동일 raw 값은 동일 토큰(코어퍼런스 유지). 통합: `chat.py` `to_normalized()` 직후(스트림/논스트림 공통). 원문 PII는 로그/반환 어디에도 안 남김(카운트만 `log_event("pii_masked")`). 설정: `PII_MASKING_ENABLED`(기본 true), `PII_TYPES`(기본 rrn,card,phone,email). `request.state.pii_masked`에 카운트 저장(메시지 본문 저장 기능 연계용).
+  - **결정/주의**: ① 전화번호 탐지는 광범위 → 전화번호 형태 식별자 오탐 가능(금융권에선 과마스킹이 안전). ② 계좌번호(계좌번호)는 형식 가변·오탐률 높아 **이번 범위에서 제외**(향후 보수적 추가 검토). ③ 마스킹은 system/assistant 포함 전 role에 적용(컴플라이언스 우선; few-shot 예시 영향은 트레이드오프). ④ 비가역 — 응답에서 detokenize 안 함(매핑 저장이 보안 표면이 되므로 의도적).
+- [ ] **금지표현 필터**: 입력 + 출력에 대해 금지 키워드/패턴 검사. 차단 또는 로깅. (PII와 같은 `app/compliance/` 패키지에 추가 예정.)
+- [ ] **응답 근거 표시**: 응답에 사용된 컨텍스트/문서 ID를 메타데이터로 첨부 (RAG 연계 → Phase 3 의존, 보류).
+- [ ] **메시지 본문 옵셔널 저장**: `AUDIT_STORE_MESSAGES=true`일 때 PII 마스킹된 본문을 audit_log에 저장 (별도 테이블 권장). PII 마스킹 완료됐으므로 `request.state.pii_masked`/마스킹된 normalized 메시지 활용 가능.
 
 ### Phase 3 — RAG (우선순위 中)
 
@@ -86,7 +87,8 @@
 - 폴백 audit: `app/audit_fallback.py`
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
-- 테스트: `tests/` (59건)
+- 컴플라이언스(PII): `app/compliance/pii.py`
+- 테스트: `tests/` (68건, PII는 `tests/test_pii.py`)
 
 ## 빠른 검증 명령
 
