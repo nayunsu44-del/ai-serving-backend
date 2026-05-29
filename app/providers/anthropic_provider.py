@@ -45,6 +45,19 @@ def _extract_retry_after(exc: AnthropicAPIError) -> str | None:
     return str(retry_after) if retry_after else None
 
 
+def _usage_token(usage: object | None, key: str) -> int:
+    if usage is None:
+        return 0
+    if isinstance(usage, dict):
+        value = usage.get(key)
+    else:
+        value = getattr(usage, key, 0)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class AnthropicProvider(AIProvider):
     name = "anthropic"
 
@@ -114,8 +127,8 @@ class AnthropicProvider(AIProvider):
         except AnthropicAPIError as exc:
             raise self._provider_error(exc) from exc
 
-        input_tokens = getattr(response.usage, "input_tokens", 0) if response.usage else 0
-        output_tokens = getattr(response.usage, "output_tokens", 0) if response.usage else 0
+        input_tokens = _usage_token(response.usage, "input_tokens")
+        output_tokens = _usage_token(response.usage, "output_tokens")
 
         return NormalizedChatResponse(
             id=response.id,
@@ -143,16 +156,8 @@ class AnthropicProvider(AIProvider):
                     yield NormalizedStreamChunk(model=request.model, delta=text)
 
                 final_message = await stream.get_final_message()
-                input_tokens = (
-                    getattr(final_message.usage, "input_tokens", 0)
-                    if final_message.usage
-                    else 0
-                )
-                output_tokens = (
-                    getattr(final_message.usage, "output_tokens", 0)
-                    if final_message.usage
-                    else 0
-                )
+                input_tokens = _usage_token(final_message.usage, "input_tokens")
+                output_tokens = _usage_token(final_message.usage, "output_tokens")
                 yield NormalizedStreamChunk(
                     id=final_message.id,
                     model=final_message.model,

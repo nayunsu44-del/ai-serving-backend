@@ -167,6 +167,37 @@ async def test_org_admin_cannot_grant_super_admin(
 
 
 @pytest.mark.asyncio
+async def test_org_admin_cannot_grant_super_admin_with_comma_injected_scope(
+    client,
+    db_sessionmaker,
+) -> None:
+    data = await _create_admin_isolation_data(db_sessionmaker)
+    org_a_headers = {"Authorization": f"Bearer {data['org_a_token']}"}
+
+    create_response = await client.post(
+        "/admin/keys",
+        headers=org_a_headers,
+        json={
+            "name": "Comma Injected Admin",
+            "scopes": ["admin,super_admin"],
+            "org_id": data["org_a_id"],
+        },
+    )
+
+    assert create_response.status_code == 200
+    body = create_response.json()
+    assert body["scopes"] == ["admin"]
+
+    escalated_headers = {"Authorization": f"Bearer {body['api_key']}"}
+    org_response = await client.post(
+        "/admin/orgs",
+        headers=escalated_headers,
+        json={"name": "Escalated Org"},
+    )
+    assert org_response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_env_super_admin_can_operate_across_orgs(
     client,
     db_sessionmaker,

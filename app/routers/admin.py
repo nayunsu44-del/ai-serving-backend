@@ -113,10 +113,11 @@ class APIKeyCreateRequest(BaseModel):
         scopes: list[str] = []
         seen: set[str] = set()
         for item in value:
-            scope = item.strip()
-            if scope and scope not in seen:
-                scopes.append(scope)
-                seen.add(scope)
+            for raw_scope in item.split(","):
+                scope = raw_scope.strip()
+                if scope and scope not in seen:
+                    scopes.append(scope)
+                    seen.add(scope)
         if not scopes:
             raise ValueError("At least one scope is required")
         return scopes

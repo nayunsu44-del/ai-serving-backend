@@ -138,6 +138,52 @@ class FakeAnthropicClient:
         return self
 
 
+class FakeAnthropicNoneUsageMessages:
+    async def create(self, **kwargs):
+        return SimpleNamespace(
+            id="msg-none-usage",
+            model=kwargs["model"],
+            content=[SimpleNamespace(text="hello")],
+            stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=None, output_tokens=None),
+        )
+
+    def stream(self, **kwargs):
+        return FakeAnthropicNoneUsageStream(kwargs["model"])
+
+
+class FakeAnthropicNoneUsageStream:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    @property
+    def text_stream(self):
+        async def events():
+            yield "hello"
+
+        return events()
+
+    async def get_final_message(self):
+        return SimpleNamespace(
+            id="msg-final-none-usage",
+            model=self.model,
+            stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=None, output_tokens=None),
+        )
+
+
+class FakeAnthropicNoneUsageClient(FakeAnthropicClient):
+    def __init__(self) -> None:
+        self.messages = FakeAnthropicNoneUsageMessages()
+        self.options: list[dict] = []
+
+
 @pytest.mark.parametrize(
     ("source", "normalized"),
     [
@@ -163,6 +209,18 @@ async def test_anthropic_non_streaming_finish_reason_is_normalized(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_anthropic_non_streaming_none_usage_fields_are_zero(monkeypatch):
+    provider = AnthropicProvider("test-key", default_max_tokens=1024)
+    monkeypatch.setattr(provider, "_get_client", lambda: FakeAnthropicNoneUsageClient())
+
+    response = await provider.chat(_request("claude-test"))
+
+    assert response.usage.prompt_tokens == 0
+    assert response.usage.completion_tokens == 0
+    assert response.usage.total_tokens == 0
+
+
+@pytest.mark.asyncio
 async def test_anthropic_streaming_finish_reason_is_normalized(monkeypatch):
     provider = AnthropicProvider("test-key", default_max_tokens=1024)
     client = FakeAnthropicClient()
@@ -172,3 +230,16 @@ async def test_anthropic_streaming_finish_reason_is_normalized(monkeypatch):
 
     assert chunks[-1].finish_reason == "length"
     assert client.options == [{"max_retries": 0}]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_streaming_none_usage_fields_are_zero(monkeypatch):
+    provider = AnthropicProvider("test-key", default_max_tokens=1024)
+    monkeypatch.setattr(provider, "_get_client", lambda: FakeAnthropicNoneUsageClient())
+
+    chunks = [chunk async for chunk in provider.chat_stream(_request("claude-test"))]
+
+    assert chunks[-1].usage is not None
+    assert chunks[-1].usage.prompt_tokens == 0
+    assert chunks[-1].usage.completion_tokens == 0
+    assert chunks[-1].usage.total_tokens == 0
