@@ -101,6 +101,23 @@ class MidStreamProviderErrorProvider(AIProvider):
         )
 
 
+class MidStreamUnhandledErrorProvider(AIProvider):
+    name = "fake"
+
+    async def chat(self, request: NormalizedChatRequest) -> NormalizedChatResponse:
+        raise AssertionError("not used")
+
+    async def chat_stream(
+        self, request: NormalizedChatRequest
+    ) -> AsyncIterator[NormalizedStreamChunk]:
+        yield NormalizedStreamChunk(
+            id="chatcmpl-midstream-unhandled-error",
+            model=request.model,
+            role="assistant",
+        )
+        raise RuntimeError("raw unexpected stream secret")
+
+
 class PricedRegistry:
     def __init__(self, provider: AIProvider) -> None:
         self.provider = provider
@@ -258,4 +275,39 @@ async def test_midstream_provider_error_writes_error_status_to_audit(
 
     assert audit_log.status_code == 502
     assert audit_log.error_type == "provider_error"
+    assert audit_log.stream is True
+
+
+@pytest.mark.asyncio
+async def test_midstream_unhandled_error_writes_error_status_to_audit(
+    app,
+    client,
+    auth_headers,
+):
+    provider = MidStreamUnhandledErrorProvider()
+    app.dependency_overrides[get_provider_registry] = lambda: PricedRegistry(provider)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=auth_headers,
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "midstream unexpected failure"}],
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Internal server error" in response.text
+    assert "raw unexpected stream secret" not in response.text
+    await _drain_audit_tasks(app)
+
+    async with app.state.db_sessionmaker() as session:
+        result = await session.execute(
+            select(AuditLog).where(AuditLog.request_id == response.headers["x-request-id"])
+        )
+        audit_log = result.scalar_one()
+
+    assert audit_log.status_code == 500
+    assert audit_log.error_type == "server_error"
     assert audit_log.stream is True

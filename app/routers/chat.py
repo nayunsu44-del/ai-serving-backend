@@ -207,6 +207,25 @@ async def _stream_chunks(
             )
         payload = openai_error_body(exc.message, exc.error_type, exc.code)
         yield _sse_data(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        request.state.error_type = "server_error"
+        request.state.audit_status_code = 500
+        logger.exception(
+            "Unhandled provider stream error",
+            extra={
+                "extra_fields": {
+                    "request_id": getattr(request.state, "request_id", None),
+                    "provider": provider.name,
+                    "model": normalized.model,
+                }
+            },
+        )
+        payload = openai_error_body(
+            "Internal server error",
+            "server_error",
+            "internal_error",
+        )
+        yield _sse_data(json.dumps(payload, ensure_ascii=False))
     finally:
         await _close_upstream_stream(upstream_stream)
         await stream_lease.release()
