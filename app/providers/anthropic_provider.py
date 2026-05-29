@@ -107,7 +107,9 @@ class AnthropicProvider(AIProvider):
         )
 
     @staticmethod
-    def _normalize_finish_reason(reason: str | None) -> str:
+    def _normalize_finish_reason(reason: str | None) -> str | None:
+        if reason is None:
+            return None
         return FINISH_REASON_MAP.get(reason, "stop")
 
     @staticmethod

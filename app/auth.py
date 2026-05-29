@@ -138,10 +138,12 @@ def _set_request_principal(request: Request, principal: APIKeyPrincipal) -> None
     request.state.scopes = principal.scopes
 
 
-def _groups_from_claim(value) -> list[str]:
+def _groups_from_claim(value, *, split_string: bool = False) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
+        if split_string:
+            return [item for item in value.split() if item]
         return [value]
     if isinstance(value, list):
         return [item for item in value if isinstance(item, str)]
@@ -170,7 +172,10 @@ async def _build_jwt_principal(request: Request, claims: dict, sessionmaker) -> 
         raise AuthenticationError("Invalid credentials")
 
     group_scope_map = parse_jwt_group_scope_map(settings.jwt_group_scope_map)
-    groups = _groups_from_claim(claims.get(settings.jwt_scope_claim))
+    groups = _groups_from_claim(
+        claims.get(settings.jwt_scope_claim),
+        split_string=settings.jwt_scope_claim in {"scope", "scp"},
+    )
     scopes = map_groups_to_scopes(groups, group_scope_map)
     if not scopes:
         raise AuthenticationError("Invalid credentials")

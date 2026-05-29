@@ -57,7 +57,7 @@ def _stream_timeout_sse() -> str:
 async def parse_chat_completion_request(request: Request) -> ChatCompletionRequest:
     try:
         body = await request.json()
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RequestValidationError(
             [
                 {

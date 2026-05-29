@@ -172,10 +172,18 @@ class ChatCompletionChunk(BaseModel):
         fallback_id: str,
         fallback_model: str,
     ) -> "ChatCompletionChunk":
+        usage_only = (
+            chunk.usage is not None
+            and chunk.role is None
+            and chunk.delta == ""
+            and chunk.finish_reason is None
+        )
         return cls(
             id=chunk.id or fallback_id,
             model=chunk.model or fallback_model,
-            choices=[
+            choices=[]
+            if usage_only
+            else [
                 ChatCompletionChunkChoice(
                     index=0,
                     delta=DeltaMessage(

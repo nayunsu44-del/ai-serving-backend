@@ -5,9 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 from app.errors import ProviderAPIError
-from app.normalized import NormalizedChatRequest, NormalizedMessage
+from app.normalized import (
+    NormalizedChatRequest,
+    NormalizedMessage,
+    NormalizedStreamChunk,
+    NormalizedUsage,
+)
 from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.openai_provider import OpenAIProvider
+from app.schemas import ChatCompletionChunk
 
 
 def _request(model: str) -> NormalizedChatRequest:
@@ -67,6 +73,22 @@ async def test_openai_streaming_requests_usage(monkeypatch):
     assert client.options == [{"max_retries": 0}]
     assert completions.calls[0]["stream"] is True
     assert completions.calls[0]["stream_options"] == {"include_usage": True}
+
+
+def test_openai_usage_only_stream_chunk_serializes_with_empty_choices():
+    chunk = ChatCompletionChunk.from_normalized(
+        NormalizedStreamChunk(
+            id="chatcmpl-usage",
+            model="gpt-test",
+            usage=NormalizedUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+        ),
+        fallback_id="chatcmpl-fallback",
+        fallback_model="gpt-fallback",
+    )
+
+    assert chunk.choices == []
+    assert chunk.usage is not None
+    assert chunk.usage.total_tokens == 3
 
 
 @pytest.mark.asyncio
@@ -192,9 +214,10 @@ class FakeAnthropicNoneUsageClient(FakeAnthropicClient):
         ("stop_sequence", "stop"),
         ("tool_use", "tool_calls"),
         ("unexpected", "stop"),
+        (None, None),
     ],
 )
-def test_anthropic_finish_reason_map(source: str, normalized: str):
+def test_anthropic_finish_reason_map(source: str | None, normalized: str | None):
     assert AnthropicProvider._normalize_finish_reason(source) == normalized
 
 

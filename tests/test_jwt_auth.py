@@ -106,6 +106,7 @@ def _settings(
     auth_mode: list[str] | None = None,
     algorithms: list[str] | None = None,
     group_scope_map: list[str] | None = None,
+    scope_claim: str = "groups",
     audience: str | None = AUDIENCE,
 ) -> Settings:
     return Settings(
@@ -120,7 +121,7 @@ def _settings(
         jwt_audience=audience,
         jwt_jwks_url="https://issuer.example.test/.well-known/jwks.json",
         jwt_algorithms=algorithms or ["RS256"],
-        jwt_scope_claim="groups",
+        jwt_scope_claim=scope_claim,
         jwt_group_scope_map=group_scope_map or ["ai-user=chat", "ai-admin=admin"],
         jwt_org_claim="org_id",
     )
@@ -275,6 +276,30 @@ async def test_jwt_mapped_scopes_control_chat_and_admin_access(rsa_keypair) -> N
     assert chat_response.status_code == 200
     assert admin_response.status_code == 401
     assert admin_ok_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_jwt_space_delimited_scope_claim_maps_scopes(rsa_keypair) -> None:
+    private_key, public_key = rsa_keypair
+    settings = _settings(
+        scope_claim="scope",
+        group_scope_map=["ai-user=chat", "ai-admin=admin"],
+    )
+    async with _test_client(settings, public_key) as (app, client, _provider):
+        org_id = await _create_org(app.state.db_sessionmaker)
+        claims = _claims(org_id, groups=[])
+        claims.pop("groups")
+        claims["scope"] = "ai-user ai-admin"
+        token = _encode_rs256(claims, private_key)
+
+        chat_response = await _chat(client, token)
+        admin_response = await client.get(
+            "/admin/usage",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert chat_response.status_code == 200
+    assert admin_response.status_code == 200
 
 
 @pytest.mark.asyncio

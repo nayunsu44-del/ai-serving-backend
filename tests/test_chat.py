@@ -186,6 +186,22 @@ async def test_model_allowlist_rejects_unconfigured_model(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_invalid_utf8_json_returns_validation_error(client, auth_headers):
+    response = await client.post(
+        "/v1/chat/completions",
+        headers={**auth_headers, "Content-Type": "application/json"},
+        content=b"{\xff",
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "message": "Invalid request: body: Invalid JSON",
+        "type": "invalid_request_error",
+        "code": "invalid_request",
+    }
+
+
+@pytest.mark.asyncio
 async def test_streaming_preflight_error_returns_json_non_200(
     app,
     client,
