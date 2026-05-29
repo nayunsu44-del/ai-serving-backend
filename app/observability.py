@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -228,6 +229,50 @@ async def _schedule_audit_log(request: Request, status_code: int, latency_ms: in
         task.add_done_callback(tasks.discard)
 
 
+def _wrap_body_iterator(
+    body_iterator: AsyncIterator[Any],
+    finalize: Callable[[], Awaitable[None]],
+) -> AsyncIterator[Any]:
+    async def wrapped() -> AsyncIterator[Any]:
+        try:
+            async for chunk in body_iterator:
+                yield chunk
+        finally:
+            await finalize()
+
+    return wrapped()
+
+
+async def _finalize_request(
+    request: Request,
+    logger: logging.Logger,
+    request_id: str,
+    start: float,
+    status_code: int,
+) -> None:
+    latency_ms = int(round((time.perf_counter() - start) * 1000))
+    log_event(
+        logger,
+        "request_complete",
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        status=status_code,
+        latency_ms=latency_ms,
+        provider=getattr(request.state, "provider", None),
+        model=getattr(request.state, "model", None),
+        token_usage=getattr(request.state, "token_usage", None),
+        error_type=getattr(request.state, "error_type", None),
+    )
+    try:
+        await _schedule_audit_log(request, status_code, latency_ms)
+    except Exception:
+        logging.getLogger("ai_serving.audit").exception(
+            "Failed to schedule audit log",
+            extra={"extra_fields": {"request_id": request_id}},
+        )
+
+
 def install_request_id_middleware(app: FastAPI) -> None:
     logger = logging.getLogger("ai_serving.requests")
 
@@ -241,33 +286,26 @@ def install_request_id_middleware(app: FastAPI) -> None:
         start = time.perf_counter()
         status_code = 500
         response: Response | None = None
+        finalize_deferred = False
+        finalized = False
+
+        async def finalize() -> None:
+            nonlocal finalized
+            if finalized:
+                return
+            finalized = True
+            await _finalize_request(request, logger, request_id, start, status_code)
 
         try:
             response = await call_next(request)
             status_code = response.status_code
+            response.headers["x-request-id"] = request_id
+
+            body_iterator = getattr(response, "body_iterator", None)
+            if body_iterator is not None:
+                response.body_iterator = _wrap_body_iterator(body_iterator, finalize)
+                finalize_deferred = True
             return response
         finally:
-            latency_ms = int(round((time.perf_counter() - start) * 1000))
-            if response is not None:
-                response.headers["x-request-id"] = request_id
-
-            log_event(
-                logger,
-                "request_complete",
-                request_id=request_id,
-                method=request.method,
-                path=request.url.path,
-                status=status_code,
-                latency_ms=latency_ms,
-                provider=getattr(request.state, "provider", None),
-                model=getattr(request.state, "model", None),
-                token_usage=getattr(request.state, "token_usage", None),
-                error_type=getattr(request.state, "error_type", None),
-            )
-            try:
-                await _schedule_audit_log(request, status_code, latency_ms)
-            except Exception:
-                logging.getLogger("ai_serving.audit").exception(
-                    "Failed to schedule audit log",
-                    extra={"extra_fields": {"request_id": request_id}},
-                )
+            if not finalize_deferred:
+                await finalize()

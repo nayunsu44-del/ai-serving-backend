@@ -106,6 +106,7 @@ def _settings(
     auth_mode: list[str] | None = None,
     algorithms: list[str] | None = None,
     group_scope_map: list[str] | None = None,
+    audience: str | None = AUDIENCE,
 ) -> Settings:
     return Settings(
         api_keys=["test-key"],
@@ -116,7 +117,7 @@ def _settings(
         database_url="sqlite+aiosqlite:///:memory:",
         audit_sync=True,
         jwt_issuer=ISSUER,
-        jwt_audience=AUDIENCE,
+        jwt_audience=audience,
         jwt_jwks_url="https://issuer.example.test/.well-known/jwks.json",
         jwt_algorithms=algorithms or ["RS256"],
         jwt_scope_claim="groups",

@@ -38,8 +38,22 @@ class PricedProvider(AIProvider):
     async def chat_stream(
         self, request: NormalizedChatRequest
     ) -> AsyncIterator[NormalizedStreamChunk]:
-        raise AssertionError("not used")
-        yield NormalizedStreamChunk(model=request.model)
+        yield NormalizedStreamChunk(
+            id="chatcmpl-audit-stream",
+            model=request.model,
+            role="assistant",
+        )
+        yield NormalizedStreamChunk(
+            id="chatcmpl-audit-stream",
+            model=request.model,
+            delta="ok",
+            finish_reason="stop",
+            usage=NormalizedUsage(
+                prompt_tokens=1_000_000,
+                completion_tokens=2_000_000,
+                total_tokens=3_000_000,
+            ),
+        )
 
 
 class PricedRegistry:
@@ -92,3 +106,40 @@ async def test_chat_completion_writes_audit_log_with_tokens_and_cost(
     assert audit_log.total_tokens == 3_000_000
     assert audit_log.cost_usd == calculate_cost("gpt-4o-mini", 1_000_000, 2_000_000)
     assert audit_log.stream is False
+
+
+@pytest.mark.asyncio
+async def test_streaming_chat_completion_writes_final_usage_to_audit_log(
+    app,
+    client,
+    auth_headers,
+):
+    provider = PricedProvider()
+    app.dependency_overrides[get_provider_registry] = lambda: PricedRegistry(provider)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=auth_headers,
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "audit streamed usage"}],
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+    await _drain_audit_tasks(app)
+
+    async with app.state.db_sessionmaker() as session:
+        result = await session.execute(
+            select(AuditLog).where(AuditLog.request_id == response.headers["x-request-id"])
+        )
+        audit_log = result.scalar_one()
+
+    assert audit_log.status_code == 200
+    assert audit_log.prompt_tokens == 1_000_000
+    assert audit_log.completion_tokens == 2_000_000
+    assert audit_log.total_tokens == 3_000_000
+    assert audit_log.cost_usd == calculate_cost("gpt-4o-mini", 1_000_000, 2_000_000)
+    assert audit_log.stream is True
