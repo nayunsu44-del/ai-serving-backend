@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건 + LOW 5건 수정 완료. 실제 API smoke 하네스 + JWT/OIDC 인증(API key 병행) 추가. 120/120 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰(MEDIUM 2+LOW 5) + 실제 API smoke 하네스 + JWT/OIDC 인증 + 랄프 루프 8라운드(버그 16건 수정) 완료. 136/136 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
 
 ## 현재 상태
 
@@ -54,6 +54,15 @@
 - **의존성 완전 고정**: `requirements.txt`를 검증된 venv의 전체 `pip freeze`로 교체(47개 전부 `==`). 기존 `>=` 6개 + 누락 전이 의존성(greenlet/lupa/Mako/MarkupSafe/sortedcontainers) 포함. `asyncpg==0.31.0` 설치로 venv가 선언 의존성과 일치.
 - **pytest 설정 고정**: `pytest.ini`(`asyncio_mode=strict`, `asyncio_default_fixture_loop_scope=function`, `testpaths=tests`).
 - **Python 3.13** 기준. README/HANDOFF 테스트 명령 일치: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+### 랄프 루프 버그 헌트 (8라운드, 완료)
+
+Codex 반복 버그 헌트 → Claude 검토(보안·로직·사이드이펙트) → 테스트 3회 독립 검증 → 라운드별 커밋. **16건 수정, 1건 반려**(JWT audience 약화 시도 — 원복). 102→136 테스트. 발견 추세 1,2,2,4,4,1,1,1(수렴).
+- 스트리밍 audit 전반: 스트림 응답은 HTTP 200 고정이라, 사후 finalize를 body 완료 후로 미루고(`observability` body_iterator 래핑) **논리적 audit_status_code**(타임아웃 504 / provider 에러 502 / 예기치 못한 예외 500)를 분리 기록 — 실패 스트림이 성공·0토큰으로 집계되던 문제 해결.
+- 스트림 모든 실패 경로 sanitized(원문 upstream/예외 무유출), lease 해제 보장.
+- 보안: [HIGH] scope 콤마 인젝션 권한상승 차단, 중첩 list 안 secret 로그 유출 차단, XSS 무관 XFF junk 필터(rightmost-trust 유지).
+- 견고성: 청크 본문 초과 413, invalid UTF-8 →422, 빈 금지규칙 전체매칭 방지, RRN 실제 달력 검증, Anthropic usage None/finish_reason None, OpenAI usage-only 청크 choices:[], OAuth scope/scp 공백구분 클레임, /admin/audit 페이지네이션 off-by-one.
+- 모든 수정에 회귀 테스트(수정 전 실패/후 통과) 포함. 상세는 git log `Ralph loop r1`~`r8`.
 
 ### JWT/OIDC 인증 (Stage 1+2, 완료)
 
@@ -131,7 +140,7 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스: `app/compliance/pii.py`(PII), `app/compliance/filter.py`(금지표현). 정책 모드/403은 `app/routers/chat.py` + `app/errors.py`(PolicyViolationError). 영속화는 `app/observability.py` + `app/db/models.py`(PolicyEvent, AuditMessage).
-- 테스트: `tests/` (120건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`, smoke 안전 `test_smoke_harness_safety.py`, JWT `test_jwt_auth.py`)
+- 테스트: `tests/` (136건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`, smoke 안전 `test_smoke_harness_safety.py`, JWT `test_jwt_auth.py`, 로그 `test_observability.py`, 감사/스트림 `test_audit.py`)
 - 실제 API smoke: `scripts/smoke_provider.py` (pytest 비수집). 기본 dry-run, `--run`일 때만 실제 호출.
 
 ## 빠른 검증 명령
