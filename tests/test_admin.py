@@ -148,7 +148,7 @@ async def test_admin_org_key_usage_audit_and_revoke_flow(
     )
     assert audit_response.status_code == 200
     audit_body = audit_response.json()
-    assert audit_body["next_offset"] == 1
+    assert audit_body["next_offset"] is None
     assert len(audit_body["items"]) == 1
     assert audit_body["items"][0]["request_id"] == chat_response.headers["x-request-id"]
     assert audit_body["items"][0]["api_key_id"] == created_key["id"]

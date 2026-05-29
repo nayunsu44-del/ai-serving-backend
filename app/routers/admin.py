@@ -319,7 +319,7 @@ async def list_audit_logs(
 ) -> AuditResponse:
     sessionmaker = _require_sessionmaker(sessionmaker)
 
-    stmt = select(AuditLog).order_by(AuditLog.ts.desc()).offset(offset).limit(limit)
+    stmt = select(AuditLog).order_by(AuditLog.ts.desc()).offset(offset).limit(limit + 1)
     scoped_org_id: str | None = None
     if not is_super_admin(principal):
         scoped_org_id = _principal_org_id(principal)
@@ -359,9 +359,9 @@ async def list_audit_logs(
             latency_ms=row.latency_ms,
             stream=row.stream,
         )
-        for row in rows
+        for row in rows[:limit]
     ]
-    next_offset = offset + limit if len(items) == limit else None
+    next_offset = offset + limit if len(rows) > limit else None
     return AuditResponse(items=items, next_offset=next_offset)
 
 

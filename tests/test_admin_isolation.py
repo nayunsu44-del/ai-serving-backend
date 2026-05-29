@@ -143,6 +143,25 @@ async def test_org_admin_is_scoped_to_own_org(
 
 
 @pytest.mark.asyncio
+async def test_audit_next_offset_only_when_more_rows_exist(
+    client,
+    db_sessionmaker,
+    auth_headers,
+) -> None:
+    await _create_admin_isolation_data(db_sessionmaker)
+
+    first_page = await client.get("/admin/audit?limit=1", headers=auth_headers)
+    exact_page = await client.get("/admin/audit?limit=2", headers=auth_headers)
+
+    assert first_page.status_code == 200
+    assert len(first_page.json()["items"]) == 1
+    assert first_page.json()["next_offset"] == 1
+    assert exact_page.status_code == 200
+    assert len(exact_page.json()["items"]) == 2
+    assert exact_page.json()["next_offset"] is None
+
+
+@pytest.mark.asyncio
 async def test_org_admin_cannot_grant_super_admin(
     client,
     db_sessionmaker,
