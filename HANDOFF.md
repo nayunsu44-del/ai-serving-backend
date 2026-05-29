@@ -119,7 +119,8 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스: `app/compliance/pii.py`(PII), `app/compliance/filter.py`(금지표현). 정책 모드/403은 `app/routers/chat.py` + `app/errors.py`(PolicyViolationError). 영속화는 `app/observability.py` + `app/db/models.py`(PolicyEvent, AuditMessage).
-- 테스트: `tests/` (102건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`)
+- 테스트: `tests/` (104건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`, smoke 안전 `test_smoke_harness_safety.py`)
+- 실제 API smoke: `scripts/smoke_provider.py` (pytest 비수집). 기본 dry-run, `--run`일 때만 실제 호출.
 
 ## 빠른 검증 명령
 
@@ -127,6 +128,17 @@
 cd C:\projects\ai-serving-backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+실제 OpenAI/Anthropic 키 연결 점검(수동, 유료 호출):
+
+```powershell
+# dry-run (호출 안 함, 계획만)
+.\.venv\Scripts\python.exe scripts\smoke_provider.py
+# 실제 호출 (env에 OPENAI_API_KEY/ANTHROPIC_API_KEY 필요)
+.\.venv\Scripts\python.exe scripts\smoke_provider.py --run
+```
+
+- 게이트웨이(ASGI) 전체 경로로 stream/non-stream 호출 → 실제 응답 + usage/cost + audit_log 행까지 검증. max_tokens 기본 16(상한 64). 키 없는 provider는 SKIP. `pytest`는 이 스크립트를 절대 실행 안 함(`testpaths=tests` + `tests/test_smoke_harness_safety.py`로 강제).
 
 ## 작업 흐름 (CLAUDE.md 기준)
 

@@ -70,6 +70,24 @@ Compliance events are recorded to `policy_event`; `AUDIT_STORE_MESSAGES=true` ad
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Smoke test (real API keys)
+
+The provider smoke harness is manual and is not collected by normal `pytest` runs. It only makes real paid OpenAI or Anthropic API calls when `--run` is passed.
+
+Run a no-network dry-run first:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/smoke_provider.py
+```
+
+To actually call selected providers, set `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` in the environment and add `--run`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/smoke_provider.py --run
+```
+
+The harness checks both streaming and non-streaming chat paths through the FastAPI gateway, uses a temporary SQLite audit database, and caps `--max-tokens` at 64 for cost safety.
+
 ## Docker quickstart
 
 ```powershell
