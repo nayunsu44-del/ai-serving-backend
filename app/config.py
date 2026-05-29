@@ -16,6 +16,19 @@ def _parse_csv(value: Any) -> list[str]:
     return value
 
 
+def parse_jwt_group_scope_map(entries: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for entry in entries:
+        group, separator, scope = entry.partition("=")
+        if not separator:
+            continue
+        group = group.strip()
+        scope = scope.strip()
+        if group and scope:
+            mapping[group] = scope
+    return mapping
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or .env."""
 
@@ -28,6 +41,10 @@ class Settings(BaseSettings):
     )
 
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list, alias="API_KEYS")
+    auth_mode: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["api_key"],
+        alias="AUTH_MODE",
+    )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     api_key_last_used_min_interval_seconds: int = Field(
@@ -47,6 +64,19 @@ class Settings(BaseSettings):
         alias="AUDIT_FALLBACK_PATH",
     )
     audit_store_messages: bool = Field(default=False, alias="AUDIT_STORE_MESSAGES")
+    jwt_issuer: str | None = Field(default=None, alias="JWT_ISSUER")
+    jwt_audience: str | None = Field(default=None, alias="JWT_AUDIENCE")
+    jwt_jwks_url: str | None = Field(default=None, alias="JWT_JWKS_URL")
+    jwt_algorithms: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["RS256"],
+        alias="JWT_ALGORITHMS",
+    )
+    jwt_scope_claim: str = Field(default="groups", alias="JWT_SCOPE_CLAIM")
+    jwt_group_scope_map: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="JWT_GROUP_SCOPE_MAP",
+    )
+    jwt_org_claim: str = Field(default="org_id", alias="JWT_ORG_CLAIM")
     policy_mode: str = Field(default="log_only", alias="POLICY_MODE")
     forbidden_patterns: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
@@ -111,6 +141,9 @@ class Settings(BaseSettings):
 
     @field_validator(
         "api_keys",
+        "auth_mode",
+        "jwt_algorithms",
+        "jwt_group_scope_map",
         "openai_models",
         "anthropic_models",
         "allowed_hosts",
@@ -122,6 +155,15 @@ class Settings(BaseSettings):
     @classmethod
     def parse_csv_lists(cls, value: Any) -> list[str]:
         return _parse_csv(value)
+
+    @field_validator("auth_mode")
+    @classmethod
+    def validate_auth_mode(cls, value: list[str]) -> list[str]:
+        allowed = {"api_key", "jwt"}
+        unknown = [item for item in value if item not in allowed]
+        if unknown:
+            raise ValueError("AUTH_MODE must contain only: api_key, jwt")
+        return value
 
     @field_validator("policy_mode")
     @classmethod

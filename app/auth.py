@@ -7,16 +7,20 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
+from app.auth_jwt import map_groups_to_scopes
+from app.config import parse_jwt_group_scope_map
 from app.db.engine import get_sessionmaker
-from app.db.models import APIKey, utc_now
+from app.db.models import APIKey, Organization, utc_now
 from app.errors import AuthenticationError
 
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger("ai_serving.auth")
+jwt_logger = logging.getLogger("ai_serving.auth.jwt")
 
 
 def _sha256_hex(value: str) -> str:
@@ -127,6 +131,58 @@ def get_api_key_resolver(request: Request) -> APIKeyResolver:
     return request.app.state.api_key_resolver
 
 
+def _set_request_principal(request: Request, principal: APIKeyPrincipal) -> None:
+    request.state.principal_hash = principal.api_key_hash
+    request.state.api_key_id = principal.api_key_id
+    request.state.org_id = principal.org_id
+    request.state.scopes = principal.scopes
+
+
+def _groups_from_claim(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+async def _build_jwt_principal(request: Request, claims: dict, sessionmaker) -> APIKeyPrincipal:
+    settings = request.app.state.settings
+    iss = claims.get("iss")
+    sub = claims.get("sub")
+    if not iss or not sub:
+        raise AuthenticationError("Invalid credentials")
+
+    org_value = claims.get(settings.jwt_org_claim)
+    if org_value is None:
+        raise AuthenticationError("Invalid credentials")
+    if sessionmaker is None:
+        raise AuthenticationError("Invalid credentials")
+
+    async with sessionmaker() as session:
+        result = await session.execute(
+            select(Organization).where(Organization.id == str(org_value))
+        )
+        org = result.scalar_one_or_none()
+    if org is None:
+        raise AuthenticationError("Invalid credentials")
+
+    group_scope_map = parse_jwt_group_scope_map(settings.jwt_group_scope_map)
+    groups = _groups_from_claim(claims.get(settings.jwt_scope_claim))
+    scopes = map_groups_to_scopes(groups, group_scope_map)
+    if not scopes:
+        raise AuthenticationError("Invalid credentials")
+
+    return APIKeyPrincipal(
+        api_key_hash=_sha256_hex(f"jwt:{iss}:{sub}"),
+        api_key_id=None,
+        org_id=org.id,
+        scopes=scopes,
+    )
+
+
 async def require_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
@@ -136,15 +192,37 @@ async def require_api_key(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AuthenticationError("Missing bearer token")
 
-    principal = await resolver.resolve(credentials.credentials, sessionmaker)
-    if principal is None:
-        raise AuthenticationError("Invalid API key")
+    token = credentials.credentials
+    settings = request.app.state.settings
+    modes = settings.auth_mode
 
-    request.state.principal_hash = principal.api_key_hash
-    request.state.api_key_id = principal.api_key_id
-    request.state.org_id = principal.org_id
-    request.state.scopes = principal.scopes
-    return principal
+    if "api_key" in modes:
+        principal = await resolver.resolve(token, sessionmaker)
+        if principal is not None:
+            _set_request_principal(request, principal)
+            return principal
+
+    if "jwt" in modes:
+        validator = getattr(request.app.state, "jwt_validator", None)
+        if validator is not None:
+            try:
+                claims = validator.validate(token)
+            except jwt.PyJWTError as exc:
+                jwt_logger.warning(
+                    "JWT validation failed",
+                    extra={"extra_fields": {"error_class": type(exc).__name__}},
+                )
+            except Exception as exc:
+                jwt_logger.warning(
+                    "JWT authentication failed",
+                    extra={"extra_fields": {"error_class": type(exc).__name__}},
+                )
+            else:
+                principal = await _build_jwt_principal(request, claims, sessionmaker)
+                _set_request_principal(request, principal)
+                return principal
+
+    raise AuthenticationError("Invalid credentials")
 
 
 def require_scope(scope: str):

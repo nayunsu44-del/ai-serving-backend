@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건 + LOW 5건 수정 완료. 102/102 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
+금융권용 AI Gateway MVP. Phase 1(기반 인프라) + 보안 패치 완료. Phase 2 대부분 완료: PII 마스킹 + 금지표현 필터 + 정책 모드(block/log_only/disabled) + policy_event/audit_message 영속화. 코드 리뷰 후 MEDIUM 2건 + LOW 5건 수정 완료. 실제 API smoke 하네스 + JWT/OIDC 인증(API key 병행) 추가. 120/120 테스트 그린, 플레이키 0건. Phase 2 잔여는 응답 근거 표시(RAG 의존)뿐.
 
 ## 현재 상태
 
@@ -54,6 +54,18 @@
 - **의존성 완전 고정**: `requirements.txt`를 검증된 venv의 전체 `pip freeze`로 교체(47개 전부 `==`). 기존 `>=` 6개 + 누락 전이 의존성(greenlet/lupa/Mako/MarkupSafe/sortedcontainers) 포함. `asyncpg==0.31.0` 설치로 venv가 선언 의존성과 일치.
 - **pytest 설정 고정**: `pytest.ini`(`asyncio_mode=strict`, `asyncio_default_fixture_loop_scope=function`, `testpaths=tests`).
 - **Python 3.13** 기준. README/HANDOFF 테스트 명령 일치: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+### JWT/OIDC 인증 (Stage 1+2, 완료)
+
+`app/auth_jwt.py` + `app/auth.py`. API key 인증과 **병행**(기존 동작 보존). 클라이언트→Gateway 앞단 인증만 추가, provider 호출은 API key 그대로.
+- `AUTH_MODE`(기본 `api_key`, CSV로 `jwt` 추가). 인증 순서: **API key 먼저 → JWT**. `api_key`만이면 JWT 거부, `jwt`만이면 API key 거부.
+- `JWTValidator`(PyJWT): JWKS/kid 서명 + iss/aud/exp + 허용 alg 화이트리스트(RS256) 검증. alg confusion/none 차단. `PyJWKClient`는 주입형 → 테스트는 로컬 RSA + 가짜 JWKS(오프라인).
+- claims → principal: `JWT_ORG_CLAIM`의 org_id로 **기존 Org 조회만**(없으면 거부, 자동생성 X). `JWT_SCOPE_CLAIM`(groups) → `JWT_GROUP_SCOPE_MAP`(group=scope) 매핑(매핑 0이면 거부). 동일 `APIKeyPrincipal` 반환 → audit/테넌트/정책/레이트리밋 재사용.
+- audit엔 원문 JWT/sub/email 안 남김 → `principal_hash = sha256("jwt:{iss}:{sub}")`.
+- 거부(모두 401): 만료·iss·aud·서명·unknown kid·disallowed alg·org claim 없음/불일치·매핑 scope 없음.
+- 설정: `JWT_ISSUER`/`JWT_AUDIENCE`/`JWT_JWKS_URL`/`JWT_ALGORITHMS`/`JWT_SCOPE_CLAIM`/`JWT_GROUP_SCOPE_MAP`/`JWT_ORG_CLAIM`. deps: `PyJWT[crypto]`(+cryptography).
+- **주의(LOW)**: `JWT_AUDIENCE` 미설정 상태로 jwt 켜면 PyJWT가 aud 값 검증을 건너뜀(존재만 요구). 운영 시 audience 필수 설정 권장(또는 build_jwt_validator에서 강제하는 하드닝 후속 가능).
+- Stage 3(이메일/claim 기반 Org·User 자동 프로비저닝)는 미구현(후속).
 
 ### P1 — 키 없는 E2E 품질 검증 (완료)
 
@@ -111,7 +123,7 @@
 
 - 진입점: `app/main.py`
 - 라우터: `app/routers/{chat,admin,health,models}.py`
-- 인증: `app/auth.py`
+- 인증: `app/auth.py`(API key), `app/auth_jwt.py`(JWT/OIDC)
 - DB: `app/db/{engine.py, models.py}`
 - 미들웨어: `app/middleware.py`, `app/observability.py`
 - 단가표: `app/pricing.py`
@@ -119,7 +131,7 @@
 - 프록시 IP: `app/net.py`
 - 설정: `app/config.py`, `.env.example`
 - 컴플라이언스: `app/compliance/pii.py`(PII), `app/compliance/filter.py`(금지표현). 정책 모드/403은 `app/routers/chat.py` + `app/errors.py`(PolicyViolationError). 영속화는 `app/observability.py` + `app/db/models.py`(PolicyEvent, AuditMessage).
-- 테스트: `tests/` (104건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`, smoke 안전 `test_smoke_harness_safety.py`)
+- 테스트: `tests/` (120건; PII `test_pii.py`/`test_pii_e2e.py`, 정책 `test_policy.py`/`test_policy_persistence.py`, 스트림 `test_streaming.py`, 하드닝 `test_hardening.py`, smoke 안전 `test_smoke_harness_safety.py`, JWT `test_jwt_auth.py`)
 - 실제 API smoke: `scripts/smoke_provider.py` (pytest 비수집). 기본 dry-run, `--run`일 때만 실제 호출.
 
 ## 빠른 검증 명령

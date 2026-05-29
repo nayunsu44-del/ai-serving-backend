@@ -20,6 +20,12 @@ Copy `.env.example` to `.env` and set values:
 
 ```dotenv
 API_KEYS=local-test-key
+AUTH_MODE=api_key
+# AUTH_MODE=api_key,jwt
+# JWT_ISSUER=https://issuer.example.com
+# JWT_AUDIENCE=ai-serving-backend
+# JWT_JWKS_URL=https://issuer.example.com/.well-known/jwks.json
+# JWT_GROUP_SCOPE_MAP=ai-user=chat,ai-admin=admin
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 DATABASE_URL=sqlite+aiosqlite:///./data/app.db
@@ -49,6 +55,14 @@ POSTGRES_DB=ai_serving
 ```
 
 `API_KEYS` are service bearer tokens accepted by this backend. They are SHA-256 hashed at startup and only hashes are retained in memory. Provider keys are used only to call upstream SDKs.
+
+## Authentication
+
+API key authentication is the default: `AUTH_MODE=api_key`. `Authorization: Bearer <api-key>` is checked against environment API keys and database API keys, and provider API keys such as `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are unaffected.
+
+OIDC-style JWT bearer authentication can be enabled alongside API keys with `AUTH_MODE=api_key,jwt`. Configure `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_JWKS_URL`, `JWT_ALGORITHMS`, `JWT_SCOPE_CLAIM`, `JWT_GROUP_SCOPE_MAP`, and `JWT_ORG_CLAIM`. JWT groups are mapped to local scopes with `group=scope` entries such as `ai-user=chat,ai-admin=admin`.
+
+JWT organization claims must match an existing `Organization.id`; the gateway does not auto-provision organizations from JWTs. Audit and rate limiting use the shared principal flow, and audit stores only a hashed principal identifier, never the raw JWT subject, email, or token.
 
 Audit and API key metadata use SQLite by default at `./data/app.db`. With Docker, that path is mounted so audit logs persist. To use Postgres, set `DATABASE_URL` to the commented Postgres example.
 

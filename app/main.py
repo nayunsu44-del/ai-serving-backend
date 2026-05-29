@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.auth import APIKeyResolver, EnvAPIKeyStore
+from app.auth_jwt import build_jwt_validator
 from app.config import Settings
 from app.db.engine import create_engine, create_sessionmaker
 from app.db.models import Base
@@ -79,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.jwt_validator = build_jwt_validator(settings)
     app.state.api_key_store = env_api_key_store
     app.state.api_key_resolver = api_key_resolver
     app.state.rate_limiter = build_rate_limit_backend(settings)
