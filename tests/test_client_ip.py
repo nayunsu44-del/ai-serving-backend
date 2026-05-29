@@ -69,6 +69,18 @@ def test_xff_spoofed_leftmost_is_skipped_when_followed_by_real_client() -> None:
     )
 
 
+def test_xff_invalid_rightmost_entry_is_skipped() -> None:
+    settings = Settings(
+        trust_forwarded_for=True,
+        trusted_proxies=["10.0.0.0/8"],
+    )
+
+    assert (
+        client_ip(_request("10.0.0.5", "1.2.3.4, 10.0.0.4, evil-spoof"), settings)
+        == "1.2.3.4"
+    )
+
+
 def test_xff_all_trusted_returns_leftmost() -> None:
     settings = Settings(
         trust_forwarded_for=True,

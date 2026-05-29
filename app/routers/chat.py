@@ -296,6 +296,7 @@ async def create_chat_completion(
             await stream_lease.release()
             return StreamingResponse(
                 _stream_timeout_only(provider, normalized, request),
+                status_code=504,
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"},
             )

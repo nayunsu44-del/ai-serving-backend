@@ -38,11 +38,19 @@ def client_ip(request: Request, settings: Any) -> str:
         return remote_ip
 
     entries = [entry.strip() for entry in forwarded_for.split(",") if entry.strip()]
-    if not entries:
+    valid_entries: list[str] = []
+    for entry in entries:
+        try:
+            ip_address(entry)
+        except ValueError:
+            continue
+        valid_entries.append(entry)
+
+    if not valid_entries:
         return remote_ip
 
-    for entry in reversed(entries):
+    for entry in reversed(valid_entries):
         if not is_trusted_proxy(entry, trusted_proxies):
             return entry
 
-    return entries[0]
+    return valid_entries[0]

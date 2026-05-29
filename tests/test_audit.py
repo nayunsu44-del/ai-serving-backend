@@ -56,6 +56,29 @@ class PricedProvider(AIProvider):
         )
 
 
+class InitialTimeoutProvider(AIProvider):
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def chat(self, request: NormalizedChatRequest) -> NormalizedChatResponse:
+        raise AssertionError("not used")
+
+    async def chat_stream(
+        self, request: NormalizedChatRequest
+    ) -> AsyncIterator[NormalizedStreamChunk]:
+        try:
+            await asyncio.sleep(2)
+            yield NormalizedStreamChunk(
+                id="chatcmpl-initial-timeout",
+                model=request.model,
+                role="assistant",
+            )
+        finally:
+            self.closed = True
+
+
 class PricedRegistry:
     def __init__(self, provider: AIProvider) -> None:
         self.provider = provider
@@ -142,4 +165,40 @@ async def test_streaming_chat_completion_writes_final_usage_to_audit_log(
     assert audit_log.completion_tokens == 2_000_000
     assert audit_log.total_tokens == 3_000_000
     assert audit_log.cost_usd == calculate_cost("gpt-4o-mini", 1_000_000, 2_000_000)
+    assert audit_log.stream is True
+
+
+@pytest.mark.asyncio
+async def test_initial_streaming_timeout_writes_504_to_response_and_audit(
+    app,
+    client,
+    auth_headers,
+):
+    app.state.settings.stream_max_duration_seconds = 1
+    provider = InitialTimeoutProvider()
+    app.dependency_overrides[get_provider_registry] = lambda: PricedRegistry(provider)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=auth_headers,
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "timeout before first chunk"}],
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 504
+    assert "stream_timeout" in response.text
+    assert provider.closed is True
+    await _drain_audit_tasks(app)
+
+    async with app.state.db_sessionmaker() as session:
+        result = await session.execute(
+            select(AuditLog).where(AuditLog.request_id == response.headers["x-request-id"])
+        )
+        audit_log = result.scalar_one()
+
+    assert audit_log.status_code == 504
+    assert audit_log.error_type == "stream_timeout"
     assert audit_log.stream is True
