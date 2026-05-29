@@ -256,13 +256,14 @@ async def _finalize_request(
     status_code: int,
 ) -> None:
     latency_ms = int(round((time.perf_counter() - start) * 1000))
+    audit_status_code = int(getattr(request.state, "audit_status_code", status_code))
     log_event(
         logger,
         "request_complete",
         request_id=request_id,
         method=request.method,
         path=request.url.path,
-        status=status_code,
+        status=audit_status_code,
         latency_ms=latency_ms,
         provider=getattr(request.state, "provider", None),
         model=getattr(request.state, "model", None),
@@ -270,7 +271,7 @@ async def _finalize_request(
         error_type=getattr(request.state, "error_type", None),
     )
     try:
-        await _schedule_audit_log(request, status_code, latency_ms)
+        await _schedule_audit_log(request, audit_status_code, latency_ms)
     except Exception:
         logging.getLogger("ai_serving.audit").exception(
             "Failed to schedule audit log",

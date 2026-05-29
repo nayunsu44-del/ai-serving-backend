@@ -105,6 +105,7 @@ async def _stream_timeout_only(
     request: Request,
 ) -> AsyncIterator[str]:
     request.state.error_type = "stream_timeout"
+    request.state.audit_status_code = 504
     log_event(
         logger,
         "chat_stream_timeout",
@@ -150,6 +151,7 @@ async def _stream_chunks(
                 break
             except asyncio.TimeoutError:
                 request.state.error_type = "stream_timeout"
+                request.state.audit_status_code = 504
                 log_event(
                     logger,
                     "chat_stream_timeout",
@@ -176,6 +178,7 @@ async def _stream_chunks(
         yield _sse_data("[DONE]")
     except APIError as exc:
         request.state.error_type = exc.error_type
+        request.state.audit_status_code = exc.status_code
         log_event(
             logger,
             "chat_stream_error",

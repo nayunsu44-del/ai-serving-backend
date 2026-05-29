@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.models import AuditLog
+from app.errors import ProviderAPIError
 from app.normalized import (
     NormalizedChatRequest,
     NormalizedChatResponse,
@@ -77,6 +78,27 @@ class InitialTimeoutProvider(AIProvider):
             )
         finally:
             self.closed = True
+
+
+class MidStreamProviderErrorProvider(AIProvider):
+    name = "fake"
+
+    async def chat(self, request: NormalizedChatRequest) -> NormalizedChatResponse:
+        raise AssertionError("not used")
+
+    async def chat_stream(
+        self, request: NormalizedChatRequest
+    ) -> AsyncIterator[NormalizedStreamChunk]:
+        yield NormalizedStreamChunk(
+            id="chatcmpl-midstream-error",
+            model=request.model,
+            role="assistant",
+        )
+        raise ProviderAPIError(
+            provider=self.name,
+            upstream_status=500,
+            raw_message="raw upstream stream secret",
+        )
 
 
 class PricedRegistry:
@@ -201,4 +223,39 @@ async def test_initial_streaming_timeout_writes_504_to_response_and_audit(
 
     assert audit_log.status_code == 504
     assert audit_log.error_type == "stream_timeout"
+    assert audit_log.stream is True
+
+
+@pytest.mark.asyncio
+async def test_midstream_provider_error_writes_error_status_to_audit(
+    app,
+    client,
+    auth_headers,
+):
+    provider = MidStreamProviderErrorProvider()
+    app.dependency_overrides[get_provider_registry] = lambda: PricedRegistry(provider)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers=auth_headers,
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "midstream failure"}],
+            "stream": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Upstream provider error" in response.text
+    assert "raw upstream stream secret" not in response.text
+    await _drain_audit_tasks(app)
+
+    async with app.state.db_sessionmaker() as session:
+        result = await session.execute(
+            select(AuditLog).where(AuditLog.request_id == response.headers["x-request-id"])
+        )
+        audit_log = result.scalar_one()
+
+    assert audit_log.status_code == 502
+    assert audit_log.error_type == "provider_error"
     assert audit_log.stream is True
