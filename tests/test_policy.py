@@ -82,7 +82,7 @@ def _all_message_content(request: NormalizedChatRequest) -> str:
 
 
 def test_compile_rules_ignores_invalid_entries_and_bad_regex() -> None:
-    rules = compile_rules(["valid=secret", "missing_separator", "bad=("])
+    rules = compile_rules(["valid=secret", "missing_separator", "bad=(", "empty="])
 
     assert len(rules) == 1
     assert rules[0].rule_id == "valid"

@@ -21,15 +21,20 @@ from app.pricing import calculate_cost
 SECRET_FIELD_RE = re.compile(r"(api[_-]?key|authorization|token|secret|\bkey\b)", re.IGNORECASE)
 
 
+def _sanitize_extra_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _sanitize_extra_fields(value)
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_extra_value(item) for item in value]
+    return value
+
+
 def _sanitize_extra_fields(fields: dict[str, Any]) -> dict[str, Any]:
     sanitized: dict[str, Any] = {}
     for key, value in fields.items():
         if value is None or SECRET_FIELD_RE.search(key):
             continue
-        if isinstance(value, dict):
-            sanitized[key] = _sanitize_extra_fields(value)
-        else:
-            sanitized[key] = value
+        sanitized[key] = _sanitize_extra_value(value)
     return sanitized
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from datetime import date
 
 from app.normalized import NormalizedMessage
 
@@ -27,8 +28,14 @@ PHONE_RE = re.compile(
 _Candidate = tuple[int, int, str, str]
 
 
-def _valid_rrn_date(month: str, day: str) -> bool:
-    return 1 <= int(month) <= 12 and 1 <= int(day) <= 31
+def _valid_rrn_date(year: str, month: str, day: str, tail: str) -> bool:
+    gender_digit = tail[0]
+    century = 1900 if gender_digit in {"1", "2", "5", "6"} else 2000
+    try:
+        date(century + int(year), int(month), int(day))
+    except ValueError:
+        return False
+    return True
 
 
 def _luhn_valid(value: str) -> bool:
@@ -45,7 +52,12 @@ def _luhn_valid(value: str) -> bool:
 
 def _rrn_candidates(text: str) -> Iterable[_Candidate]:
     for match in RRN_RE.finditer(text):
-        if not _valid_rrn_date(match.group(2), match.group(3)):
+        if not _valid_rrn_date(
+            match.group(1),
+            match.group(2),
+            match.group(3),
+            match.group(4),
+        ):
             continue
         yield (match.start(), match.end(), "rrn", match.group(0))
 

@@ -60,6 +60,19 @@ def test_rrn_masks_valid_date_but_not_invalid_date() -> None:
     assert counts == {"rrn": 1}
 
 
+def test_rrn_masks_only_real_calendar_dates_for_encoded_century() -> None:
+    masked, counts = mask_text(
+        "invalid 900231-1234567 leap 000229-3234567 nonleap 000229-1234567",
+        ALL_TYPES,
+    )
+
+    assert masked == (
+        "invalid 900231-1234567 leap [REDACTED:RRN:1] "
+        "nonleap 000229-1234567"
+    )
+    assert counts == {"rrn": 1}
+
+
 def test_card_masks_only_luhn_valid_numbers() -> None:
     masked, counts = mask_text(
         "valid 4111111111111111 invalid 4111111111111112",

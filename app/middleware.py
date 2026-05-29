@@ -72,7 +72,15 @@ class BodySizeLimitMiddleware:
                     raise RequestBodyTooLarge()
             return message
 
-        await self.app(scope, limited_receive, send)
+        try:
+            await self.app(scope, limited_receive, send)
+        except RequestBodyTooLarge:
+            await _error_response(
+                413,
+                "Request body too large",
+                "invalid_request_error",
+                "request_too_large",
+            )(scope, receive, send)
 
 
 class PreAuthRateLimitMiddleware(BaseHTTPMiddleware):

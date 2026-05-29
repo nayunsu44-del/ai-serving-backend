@@ -41,6 +41,12 @@ def _compile_rules_cached(patterns: tuple[str, ...]) -> tuple[CompiledRule, ...]
         rule_id = rule_id.strip()
         if not separator or not rule_id:
             continue
+        if regex == "":
+            logger.warning(
+                "Empty forbidden content rule pattern skipped",
+                extra={"extra_fields": {"rule_id": rule_id}},
+            )
+            continue
         # This bounds some obvious ReDoS exposure, but true immunity requires a
         # timeout-capable engine such as regex or subprocess-isolated matching.
         if len(regex) > MAX_RULE_PATTERN_CHARS:

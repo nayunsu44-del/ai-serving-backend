@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
 from app.main import create_app
+from app.middleware import BodySizeLimitMiddleware
 from app.normalized import (
     NormalizedChatRequest,
     NormalizedChatResponse,
@@ -121,6 +122,60 @@ async def test_oversize_body_returns_413():
 
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "request_too_large"
+
+
+@pytest.mark.asyncio
+async def test_chunked_oversize_body_returns_413() -> None:
+    async def downstream_app(scope, receive, send):
+        more_body = True
+        while more_body:
+            message = await receive()
+            more_body = message.get("more_body", False)
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    app = BodySizeLimitMiddleware(downstream_app, max_bytes=5)
+    receive_messages = iter(
+        [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"456", "more_body": False},
+        ]
+    )
+    sent_messages = []
+
+    async def receive():
+        return next(receive_messages)
+
+    async def send(message):
+        sent_messages.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/chat/completions",
+            "raw_path": b"/v1/chat/completions",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+
+    assert sent_messages[0]["type"] == "http.response.start"
+    assert sent_messages[0]["status"] == 413
+    assert b"request_too_large" in sent_messages[1]["body"]
 
 
 @pytest.mark.asyncio
