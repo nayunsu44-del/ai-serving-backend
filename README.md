@@ -1,5 +1,7 @@
 # AI Serving Backend
 
+[![CI](https://github.com/nayunsu44-del/ai-serving-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/nayunsu44-del/ai-serving-backend/actions/workflows/ci.yml)
+
 FastAPI backend that exposes an OpenAI-compatible subset and routes chat requests to OpenAI or Anthropic providers.
 
 Supported chat fields are `model`, `messages`, `stream`, `temperature`, and `max_tokens`. Additional request fields are rejected with a validation error; unsupported model prefixes return an OpenAI-style error JSON.
