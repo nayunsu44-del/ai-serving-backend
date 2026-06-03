@@ -33,4 +33,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
-        run: pytest -q
+        # `python -m` puts the project root on sys.path so `import app` resolves,
+        # matching the documented `python -m pytest` invocation.
+        run: python -m pytest -q
