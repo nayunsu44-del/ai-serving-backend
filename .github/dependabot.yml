@@ -8,6 +8,11 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    ignore:
+      # pydantic-core is pinned transitively by pydantic (pydantic==X requires an
+      # exact pydantic-core==Y). Bumping it alone breaks the lock, so let it ride
+      # with pydantic instead of getting its own PRs.
+      - dependency-name: pydantic-core
 
   # GitHub Actions versions in .github/workflows
   - package-ecosystem: github-actions
