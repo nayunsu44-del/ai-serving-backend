@@ -16,7 +16,7 @@ colorama==0.4.6
 cryptography==48.0.0
 distro==1.9.0
 docstring_parser==0.18.0
-fakeredis==2.35.1
+fakeredis==2.36.0
 fastapi==0.136.3
 greenlet==3.5.1
 h11==0.16.0
