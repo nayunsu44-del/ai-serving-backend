@@ -16,45 +16,98 @@ pip install -r requirements.txt
 
 ## Configure
 
-Copy `.env.example` to `.env` and set values:
+Copy `.env.example` to `.env` and set values. The minimum to boot locally:
 
 ```dotenv
 API_KEYS=local-test-key
 AUTH_MODE=api_key
-# AUTH_MODE=api_key,jwt
-# JWT_ISSUER=https://issuer.example.com
-# JWT_AUDIENCE=ai-serving-backend
-# JWT_JWKS_URL=https://issuer.example.com/.well-known/jwks.json
-# JWT_GROUP_SCOPE_MAP=ai-user=chat,ai-admin=admin
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 DATABASE_URL=sqlite+aiosqlite:///./data/app.db
-# DATABASE_URL=postgresql+asyncpg://app:change-me@postgres:5432/ai_serving
-RATE_LIMIT_RPM=60
-RATE_LIMIT_BACKEND=memory
-# REDIS_URL=redis://redis:6379/0
-PRE_AUTH_RPM_PER_IP=30
-TRUSTED_PROXIES=
-TRUST_FORWARDED_FOR=false
-AUDIT_SYNC=false
-AUDIT_FALLBACK_PATH=./data/audit_fallback.jsonl
-PII_MASKING_ENABLED=true
-PII_TYPES=rrn,card,phone,email
-MAX_REQUEST_BYTES=1048576
-MAX_MESSAGES=200
-MAX_MESSAGE_CHARS=100000
-MAX_MODEL_NAME_CHARS=128
-MAX_OUTPUT_TOKENS=4096
-STREAM_MAX_DURATION_SECONDS=300
-MAX_CONCURRENT_STREAMS_PER_KEY=4
-ALLOWED_HOSTS=*
-DOCS_ENABLED=true
-POSTGRES_USER=app
-POSTGRES_PASSWORD=change-me
-POSTGRES_DB=ai_serving
 ```
 
 `API_KEYS` are service bearer tokens accepted by this backend. They are SHA-256 hashed at startup and only hashes are retained in memory. Provider keys are used only to call upstream SDKs.
+
+`.env.example` lists every variable with a runnable default. The full reference, with code defaults, is below. Comma-separated list values (`AUTH_MODE`, `OPENAI_MODELS`, `PII_TYPES`, etc.) are split on commas and trimmed.
+
+### Settings reference
+
+**Auth**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `API_KEYS` | (empty) | Service bearer tokens, comma-separated. SHA-256 hashed at startup. |
+| `AUTH_MODE` | `api_key` | `api_key`, or `api_key,jwt` to also accept OIDC JWTs. |
+| `OPENAI_API_KEY` | (none) | Upstream OpenAI key. |
+| `ANTHROPIC_API_KEY` | (none) | Upstream Anthropic key. |
+| `API_KEY_LAST_USED_MIN_INTERVAL_SECONDS` | `60` | Debounce for `last_used_at` writes on DB API keys. |
+| `JWT_ISSUER` | (none) | Expected JWT issuer. |
+| `JWT_AUDIENCE` | (none) | Expected JWT audience. |
+| `JWT_JWKS_URL` | (none) | JWKS endpoint for signature verification. |
+| `JWT_ALGORITHMS` | `RS256` | Allowed JWT signing algorithms (comma-separated). |
+| `JWT_SCOPE_CLAIM` | `groups` | JWT claim that holds the user's groups. |
+| `JWT_GROUP_SCOPE_MAP` | (empty) | `group=scope` entries, e.g. `ai-user=chat,ai-admin=admin`. |
+| `JWT_ORG_CLAIM` | `org_id` | JWT claim that holds the organization id. |
+
+**Storage & rate limiting**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./data/app.db` | Async SQLAlchemy DSN; set a Postgres DSN for production. |
+| `REDIS_URL` | (none) | Redis DSN, required when `RATE_LIMIT_BACKEND=redis`. |
+| `RATE_LIMIT_RPM` | `60` | Requests per minute per API key; `0` disables. |
+| `RATE_LIMIT_BACKEND` | `memory` | `memory` or `redis`. |
+| `RATE_LIMIT_STRICT` | `false` | When `true`, a missing/unreachable Redis fails closed instead of falling back to in-memory. |
+| `PRE_AUTH_RPM_PER_IP` | `30` | Failed/missing-auth attempts per minute per client IP; `0` disables. |
+| `TRUSTED_PROXIES` | (empty) | Trusted proxy IPs/CIDRs (comma-separated). |
+| `TRUST_FORWARDED_FOR` | `false` | Honor `X-Forwarded-For`; only enable with `TRUSTED_PROXIES` set. |
+
+**Audit, compliance & PII**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AUDIT_ENABLED` | `true` | Master switch for audit logging. |
+| `AUDIT_SYNC` | `false` | `true` awaits the audit insert before responding. |
+| `AUDIT_FALLBACK_PATH` | `./data/audit_fallback.jsonl` | JSONL file written when DB audit insert fails. |
+| `AUDIT_STORE_MESSAGES` | `false` | Also store PII-masked message bodies in `audit_message`. |
+| `POLICY_MODE` | `log_only` | `block`, `log_only`, or `disabled`. |
+| `FORBIDDEN_PATTERNS` | (empty) | `rule_id=regex` entries, case-insensitive (no commas inside a regex). |
+| `PII_MASKING_ENABLED` | `true` | Redact PII before calling the upstream provider. |
+| `PII_TYPES` | `rrn,card,phone,email` | Which PII detectors run. |
+
+**Limits & output**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DEFAULT_MAX_TOKENS` | `1024` | `max_tokens` applied **when the client omits it**. Anthropic requires `max_tokens`, so an omitted value is filled with this; OpenAI is left to its own default. |
+| `MAX_OUTPUT_TOKENS` | `4096` | Hard ceiling: a request's `max_tokens` may not exceed this or it is rejected with a validation error. |
+| `MAX_REQUEST_BYTES` | `1048576` | Maximum request body size. |
+| `MAX_MESSAGES` | `200` | Maximum messages per request. |
+| `MAX_MESSAGE_CHARS` | `100000` | Maximum characters per message. |
+| `MAX_MODEL_NAME_CHARS` | `128` | Maximum model name length. |
+| `STREAM_MAX_DURATION_SECONDS` | `300` | Maximum streaming response duration. |
+| `MAX_CONCURRENT_STREAMS_PER_KEY` | `4` | Concurrent streams allowed per API key. |
+
+**Models & server**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OPENAI_MODELS` | `gpt-4o,gpt-4o-mini` | Routable OpenAI model IDs (comma-separated). |
+| `ANTHROPIC_MODELS` | `claude-sonnet-4-6,claude-3-5-haiku-latest` | Routable Anthropic model IDs (comma-separated). |
+| `LOG_LEVEL` | `INFO` | Application log level. |
+| `ALLOWED_HOSTS` | `*` | Allowed `Host` headers; lock down in production. |
+| `DOCS_ENABLED` | `true` | Serve `/docs` and `/openapi.json`; disable in production. |
+
+> **`DEFAULT_MAX_TOKENS` vs `MAX_OUTPUT_TOKENS`** — these are different knobs. `MAX_OUTPUT_TOKENS` (4096) is the ceiling a request may ask for; `DEFAULT_MAX_TOKENS` (1024) is the value used when a request omits `max_tokens` entirely. If Anthropic output looks truncated at 1024 tokens, pass an explicit `max_tokens` in the request or raise `DEFAULT_MAX_TOKENS`.
+
+### Supported models
+
+Only the IDs in `OPENAI_MODELS` and `ANTHROPIC_MODELS` are routable; any other model returns an OpenAI-style "model not found" error. Out of the box that is:
+
+- OpenAI: `gpt-4o`, `gpt-4o-mini`
+- Anthropic: `claude-sonnet-4-6`, `claude-3-5-haiku-latest`
+
+Override either list via the environment variables above to add or remove models.
 
 ## Authentication
 
@@ -64,7 +117,7 @@ OIDC-style JWT bearer authentication can be enabled alongside API keys with `AUT
 
 JWT organization claims must match an existing `Organization.id`; the gateway does not auto-provision organizations from JWTs. Audit and rate limiting use the shared principal flow, and audit stores only a hashed principal identifier, never the raw JWT subject, email, or token.
 
-Audit and API key metadata use SQLite by default at `./data/app.db`. With Docker, that path is mounted so audit logs persist. To use Postgres, set `DATABASE_URL` to the commented Postgres example.
+Audit and API key metadata use SQLite by default at `./data/app.db`. With Docker, that path is mounted so audit logs persist. To use Postgres, set `DATABASE_URL` to the commented Postgres DSN in `.env.example` (`postgresql+asyncpg://app:change-me@postgres:5432/ai_serving`).
 
 Rate limiting uses an in-memory token bucket for development and tests by default (`RATE_LIMIT_BACKEND=memory`). Set `RATE_LIMIT_BACKEND=redis` and `REDIS_URL=redis://redis:6379/0` to use Redis in Docker.
 
