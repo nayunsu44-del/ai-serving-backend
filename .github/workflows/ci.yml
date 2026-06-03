@@ -36,3 +36,36 @@ jobs:
         # `python -m` puts the project root on sys.path so `import app` resolves,
         # matching the documented `python -m pytest` invocation.
         run: python -m pytest -q
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Build only (no push) so Dockerfile drift — e.g. a base-image/Python
+      # version mismatch — fails CI instead of shipping a broken image.
+      - name: Build image
+        run: docker build -t ai-serving-backend:ci .
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # Fail on known CVEs in the pinned dependency lock.
+      - name: Run pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit -r requirements.txt
