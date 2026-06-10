@@ -13,7 +13,7 @@ certifi==2026.5.20
 cffi==2.0.0
 click==8.4.1
 colorama==0.4.6
-cryptography==48.0.0
+cryptography==48.0.1
 distro==1.9.0
 docstring_parser==0.18.0
 fakeredis==2.36.0
