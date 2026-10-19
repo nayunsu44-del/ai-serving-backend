@@ -1,0 +1,4 @@
+# Ruff configuration. Lint rules are intentionally close to defaults
+# (pyflakes + a pycodestyle subset) so the gate stays low-noise.
+target-version = "py313"
+line-length = 100
