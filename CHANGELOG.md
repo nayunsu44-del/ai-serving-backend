@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bump dependencies flagged by `pip-audit`: anyio 4.13.0 → 4.14.2,
+  cryptography 48.0.1 → 50.0.0, pydantic-settings 2.14.1 → 2.14.2,
+  PyJWT 2.13.0 → 2.15.0, starlette 1.2.1 → 1.3.1.
+
 ## [0.1.0] - 2026-06-03
 
 First tagged release. An authenticating, OpenAI-compatible chat gateway in
